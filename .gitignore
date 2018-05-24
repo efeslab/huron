@@ -1,0 +1,16 @@
+# Modified C++ std for clang
+5/
+
+# IDEs
+.idea/
+.vscode/
+
+# Outputs
+*.log
+*.so
+*.csv
+tensor
+false
+
+# Predator
+predator_obsolete/
