@@ -18,13 +18,13 @@ extern "C" {
 __thread Thread *current;
 
 void *globalStart, *globalEnd;
-void *heapStart = (void*)((uintptr_t)1 << 63), *heapEnd;
+void *heapStart = (void *) ((uintptr_t) 1 << 63), *heapEnd;
 
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
 void *malloc(size_t size) noexcept;
 // void free(void *ptr);
-void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id, 
+void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write);
 
 void store_16bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
@@ -61,13 +61,14 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 
 // typedef std::map<uintptr_t, CacheInfo> addr_cache_map_t;
 typedef std::map<uintptr_t, size_t> malloc_size_map_t;
-typedef std::map<uintptr_t, CacheLine> CacheLineBitmap;
+typedef std::map<uintptr_t, CacheLine*> CacheLineBitmap;
 CacheLineBitmap allCacheLineInfo;
 std::mutex allCacheLineInfoLock;
 
 class MallocHookDeactivator {
-  public:
+public:
     MallocHookDeactivator() noexcept { current->malloc_hook_active = false; }
+
     ~MallocHookDeactivator() noexcept { current->malloc_hook_active = true; }
 };
 
@@ -88,7 +89,7 @@ void finalizer(void) {
 #ifdef DEBUG
     printf("Finalizing...\n");
     for (auto &p : malloc_sizes_in_word)
-        printf("alloc: %p, %lu words\n", (void*)p.first, p.second);
+        printf("alloc: %p, %lu words\n", (void *) p.first, p.second);
 #endif
     xthread::getInstance().flush_all_thread_logs();
 }
@@ -96,6 +97,7 @@ void finalizer(void) {
 // void alloc_insert_cachelines(void *start, void *end, addr_cache_map_t &map) {}
 
 extern void *__libc_malloc(size_t size);
+
 extern void __libc_free(void *ptr);
 
 void *my_malloc_hook(size_t size, const void *caller) {
@@ -147,43 +149,38 @@ void *malloc(size_t size) noexcept {
 //     return __libc_free(ptr);
 // }
 
-void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id, 
+void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write) {
     MallocHookDeactivator deactiv;
-    auto addr_ptr = (void*)addr;
+    auto addr_ptr = (void *) addr;
     if (
-        (addr_ptr < heapStart || addr_ptr >= heapEnd) &&    // not heap object
-        (addr_ptr < globalStart || addr_ptr >= globalEnd)   // not global object
-    )
+            (addr_ptr < heapStart || addr_ptr >= heapEnd) &&    // not heap object
+            (addr_ptr < globalStart || addr_ptr >= globalEnd)   // not global object
+            )
         return;
     uintptr_t cacheLineId = (addr >> 6);
-    CacheLineBitmap::iterator found = allCacheLineInfo.find(cacheLineId);
-    bool isInstrumented = false;
-    CacheLine *cl;
-    if (found == allCacheLineInfo.end())
-    {
-      /*CacheLine cl;
-      if (is_write) cl.store(getThreadIndex());
-      else cl.load(getThreadIndex());*/
-      allCacheLineInfoLock.lock();
-      allCacheLineInfo.insert(std::make_pair(cacheLineId, CacheLine()));
-      cl = &allCacheLineInfo.find(cacheLineId)->second;
-      if(is_write) cl->store(getThreadIndex());
-      else cl->load(getThreadIndex());
-      allCacheLineInfoLock.unlock();
-      isInstrumented = false;
-    } else {
-      cl= & found->second;
-      allCacheLineInfoLock.lock();
-      isInstrumented = is_write ? cl->store(getThreadIndex()) : cl->load(getThreadIndex());
-      allCacheLineInfoLock.unlock();
+    auto found = allCacheLineInfo.find(cacheLineId);
+    bool isInstrumented;
+    CacheLine *cl_ptr;
+    if (found == allCacheLineInfo.end()) {
+        /*CacheLine cl;
+        if (is_write) cl.store(getThreadIndex());
+        else cl.load(getThreadIndex());*/
+        cl_ptr = new CacheLine;
+        allCacheLineInfoLock.lock();
+        allCacheLineInfo.emplace(cacheLineId, cl_ptr);
+        allCacheLineInfoLock.unlock();
     }
-    if(isInstrumented)current->log_load_store(addr, (uint16_t)func_id, (uint16_t)inst_id, (uint16_t)size, is_write);
+    else
+        cl_ptr = found->second;
+    isInstrumented = is_write ? cl_ptr->store(getThreadIndex()) : cl_ptr->load(getThreadIndex());
+    if (isInstrumented)
+        current->log_load_store(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
 }
 
 // Intercept the pthread_create function.
-int pthread_create(pthread_t * tid, const pthread_attr_t * attr, 
-                   void *(*start_routine) (void *), void * arg) {
+int pthread_create(pthread_t *tid, const pthread_attr_t *attr,
+                   void *(*start_routine)(void *), void *arg) {
     MallocHookDeactivator deactiv;
     int res = xthread::getInstance().thread_create(tid, attr, start_routine, arg);
     current->malloc_hook_active = true;

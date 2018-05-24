@@ -6,9 +6,6 @@
 
 typedef void * threadFunction (void *);
 
-extern FILE *f;
-extern std::mutex file_mut;
-
 const size_t LOG_SIZE = 1 << 19;
 
 struct RWRecord {
@@ -17,13 +14,15 @@ struct RWRecord {
     bool is_write;
     RWRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size, bool _is_write):
         addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size), is_write(_is_write) {}
-    RWRecord() {}
+    RWRecord() = default;
 };
 
 struct Thread {
     // Buffer for read/write records.
     RWRecord outputBuf[LOG_SIZE];
     size_t output_n;
+    // File handle
+    FILE *buffer_f;
     // Results of pthread_self
     pthread_t self;
     // The following is the parameter about starting function. 

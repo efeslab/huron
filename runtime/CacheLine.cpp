@@ -1,14 +1,13 @@
-#include <stdint.h>
+#include <cstdint>
+#include <atomic>
+#include <algorithm>
 
 class CacheLine{
 private:
-  uint16_t bitmap;
+  std::atomic<uint16_t> bitmap;
 public:
-  CacheLine()
-  {
-    bitmap = 0x7fff;
-  }
-  bool isInstrumented()
+  CacheLine(): bitmap(0x7fff) {}
+  bool isInstrumented() const
   {
     if(bitmap >> 15)
     {
@@ -32,7 +31,7 @@ public:
     }
     else
     {
-      bitmap = bitmap | (1<<15);
+      bitmap |= (1<<15);
       return true;
     }
     return false;
@@ -49,7 +48,7 @@ public:
     }
     else if (bitmap != (uint16_t) threadId)
     {
-      bitmap = bitmap | (1<<15);
+      bitmap |= (1<<15);
       return true;
     }
     return false;
