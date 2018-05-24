@@ -97,6 +97,9 @@ class AddrRecord:
         # The number of breakpoints will not exceed CACHELINE_SIZE, so this is actually O(n).
         return addr_records
 
+    def get_total_rw(self):
+        return sum(x for rw in self.thread_rw.values() for x in rw)
+
     def is_read_only(self):
         for r, w in self.thread_rw.values():
             if w != 0:
@@ -129,19 +132,20 @@ def get_groups_from_log(file):
     return groups
 
 
-def filter_st_groups(groups):
-    def is_single_threaded(group):
-        threads = set([rec.thread for rec in group])
-        return len(threads) == 1
-
-    groups_filtered = []
-    single_counter = 0
-    for clid, group in groups:
-        if is_single_threaded(group):
-            single_counter += 1
+def filter_count(objs, in_pred):
+    in_list = []
+    out_counter = 0
+    for o in objs:
+        if in_pred(o):
+            in_list.append(o)
         else:
-            groups_filtered.append((clid, group))
-    return single_counter, groups_filtered
+            out_counter += 1
+    return out_counter, in_list
+
+
+def cl_multi_threaded(group):
+    threads = set([rec.thread for rec in group])
+    return len(threads) != 1
 
 
 class Edge:
@@ -178,16 +182,13 @@ class Graph:
     def is_complete_graph(self):
         return len(self.e) == len(self.v) * (len(self.v) - 1) / 2
 
-    @staticmethod
-    def filter_complete_graph(graphs):
-        in_list = []
-        out_counter = 0
-        for g in graphs:
-            if g.is_complete_graph():
-                out_counter += 1
-            else:
-                in_list.append(g)
-        return out_counter, in_list
+
+def is_4equalnodes(g):
+    return len(g.v) == 4 and all(v.end - v.start == 16 for v in g.v)
+
+
+def is_all_nodes_rw_1(g):
+    return all(v.get_total_rw() == 1 for v in g.v)
 
 
 def print_first_pass(path, groups):
@@ -249,7 +250,7 @@ def main():
         groups = get_groups_from_log(f)
 
     n = len(groups)
-    single_n, groups = filter_st_groups(groups)
+    single_n, groups = filter_count(groups, lambda group: cl_multi_threaded(group[1]))
 
     addrrec_groups = [
         (clid, AddrRecord.from_cacheline_records(clid, group))
@@ -259,17 +260,21 @@ def main():
     sanity_check(groups, addrrec_groups)
 
     graphs = [Graph(clid, group) for clid, group in addrrec_groups]
-    noedge_n, graphs = Graph.filter_complete_graph(graphs)
-
-    # print_first_pass(groups)
-    # print_second_pass(addrrec_groups)
+    noedge_n, graphs = filter_count(graphs, lambda g: not g.is_complete_graph())
+    minimal_n, graphs = filter_count(
+        graphs,
+        lambda g: not is_4equalnodes(g) or not is_all_nodes_rw_1(g)
+    )
+    # print_first_pass(path, groups)
+    # print_second_pass(path, addrrec_groups)
     print_final(path, graphs)
 
-    stats = n, single_n, noedge_n, n - single_n - noedge_n
+    stats = n, single_n, noedge_n, minimal_n, n - single_n - noedge_n - minimal_n
     print("""
 %d cachelines in total. 
 %d cachelines are single threaded (removed).
 %d cacheline graphs have no edges (removed).
+%d graphs are 4 symmetric nodes with r, w = 0, 1
 Remain: %d
 """ % stats)
 
