@@ -35,7 +35,7 @@ Allocate and manage thread index.
 
 #include "LoggingThread.h"
 
-const int MAX_THREADS = 32;
+const int MAX_THREADS = 64;
 
 extern "C" __thread Thread *current;
 
