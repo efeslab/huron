@@ -3,8 +3,8 @@
 #include <cstdio>
 #include <vector>
 #include <map>
-#include <unordered_map>
 #include <dlfcn.h>
+#include <mutex>
 
 #include "CustomAllocator.h"
 #include "MemArith.h"
@@ -61,8 +61,9 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 
 // typedef std::map<uintptr_t, CacheInfo> addr_cache_map_t;
 typedef std::map<uintptr_t, size_t> malloc_size_map_t;
-typedef std::unordered_map<uintptr_t, CacheLine> CacheLineBitmap;
+typedef std::map<uintptr_t, CacheLine> CacheLineBitmap;
 CacheLineBitmap allCacheLineInfo;
+std::mutex allCacheLineInfoLock;
 
 class MallocHookDeactivator {
   public:
@@ -158,16 +159,24 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     uintptr_t cacheLineId = (addr >> 6);
     CacheLineBitmap::iterator found = allCacheLineInfo.find(cacheLineId);
     bool isInstrumented = false;
+    CacheLine *cl;
     if (found == allCacheLineInfo.end())
     {
-      CacheLine cl;
-      allCacheLineInfo.insert(std::make_pair(cacheLineId, cl));
+      /*CacheLine cl;
       if (is_write) cl.store(getThreadIndex());
-      else cl.load(getThreadIndex());
+      else cl.load(getThreadIndex());*/
+      allCacheLineInfoLock.lock();
+      allCacheLineInfo.insert(std::make_pair(cacheLineId, CacheLine()));
+      cl = &allCacheLineInfo.find(cacheLineId)->second;
+      if(is_write) cl->store(getThreadIndex());
+      else cl->load(getThreadIndex());
+      allCacheLineInfoLock.unlock();
       isInstrumented = false;
     } else {
-      CacheLine cl= found->second;
-      isInstrumented = is_write ? cl.store(getThreadIndex()) : cl.load(getThreadIndex());
+      cl= & found->second;
+      allCacheLineInfoLock.lock();
+      isInstrumented = is_write ? cl->store(getThreadIndex()) : cl->load(getThreadIndex());
+      allCacheLineInfoLock.unlock();
     }
     if(isInstrumented)current->log_load_store(addr, (uint16_t)func_id, (uint16_t)inst_id, (uint16_t)size, is_write);
 }
