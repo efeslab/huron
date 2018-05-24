@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
 import csv
+import os
+import sys
 from collections import defaultdict
 from itertools import groupby
 
@@ -115,7 +117,7 @@ class AddrRecord:
     @staticmethod
     def thread_equivalence(rec1, rec2):
         return AddrRecord.read_only_2(rec1, rec2) or \
-            AddrRecord.same_thread_affinity(rec1, rec2)
+               AddrRecord.same_thread_affinity(rec1, rec2)
 
 
 def get_groups_from_log(file):
@@ -188,18 +190,33 @@ class Graph:
         return out_counter, in_list
 
 
-def print_first_pass(groups):
-    with open('__record__100_2_pass1.log', 'w') as f:
+def print_first_pass(path, groups):
+    suffix = '_pass1'
+    root, ext = os.path.splitext(path)
+    first_pass_file = root + suffix + ext
+    with open(first_pass_file, 'w') as f:
         for _, rows in groups:
             for rec in rows:
                 print(str(rec), file=f)
 
 
-def print_second_pass(addrrec_groups):
-    with open('__record__100_2_pass2.log', 'w') as f:
+def print_second_pass(path, addrrec_groups):
+    suffix = '_pass2'
+    root, ext = os.path.splitext(path)
+    second_pass_file = root + suffix + ext
+    with open(second_pass_file, 'w') as f:
         for clid, group in addrrec_groups:
             for addrrec in group:
                 print(addrrec, file=f)
+
+
+def print_final(path, graphs):
+    suffix = '_output'
+    root, ext = os.path.splitext(path)
+    output_file = root + suffix + ext
+    with open(output_file, 'w') as f:
+        for g in graphs:
+            print(g, file=f)
 
 
 def sanity_check(groups, addrrec_groups):
@@ -213,13 +230,22 @@ def sanity_check(groups, addrrec_groups):
         assert addrrec_rw == group_rw
 
 
-def append_csv_file(csv_line):
-    with open('__record__100_2_stable.csv', 'a') as f:
+def append_csv_file(path, csv_line):
+    suffix_ext = '_stable.csv'
+    root, _ = os.path.splitext(path)
+    csv_file = root + suffix_ext
+    with open(csv_file, 'a') as f:
         print(csv_line, file=f)
 
 
 def main():
-    with open('__record__100_2.log', 'r') as f:
+    args = sys.argv
+    if len(args) != 2:
+        print("Usage: %s LOGFILE" % args[0])
+        sys.exit(1)
+    path = args[1]
+
+    with open(path, 'r') as f:
         groups = get_groups_from_log(f)
 
     n = len(groups)
@@ -237,20 +263,18 @@ def main():
 
     # print_first_pass(groups)
     # print_second_pass(addrrec_groups)
+    print_final(path, graphs)
 
-    with open('__record__100_2_output.log', 'w') as f:
-        for g in graphs:
-            print(g, file=f)
-
+    stats = n, single_n, noedge_n, n - single_n - noedge_n
     print("""
 %d cachelines in total. 
 %d cachelines are single threaded (removed).
 %d cacheline graphs have no edges (removed).
 Remain: %d
-""" % (n, single_n, noedge_n, n - single_n - noedge_n))
+""" % stats)
 
-    csv_line = ','.join(str(x) for x in (n, single_n, noedge_n, n - single_n - noedge_n))
-    append_csv_file(csv_line)
+    csv_line = ','.join(str(x) for x in stats)
+    append_csv_file(path, csv_line)
 
 
 main()
