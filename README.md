@@ -4,21 +4,20 @@
 
 _We are not using Predator anymore._
 
-Builds reliable false sharing profile at *word granularity*.
+Builds reliable false sharing profile at *word/byte granularity* instead of object level.
 
 ### Profile Def.
 
-The profile is a graph with many disconnected subgraphs; a subgraph corresponds to a cache line (so it has no more than 8 vertices)
+The profile is a graph with many disconnected subgraphs; a subgraph corresponds to a cache line (so it has no more than `cacheline_size` vertices)
 
-**Vertex**: word identifiers (preferably, only where at least 1 false sharing happens, to reduce output size)
+**Vertex**: word identifiers (preferably, only where false sharing happens, to reduce output size)
 
 - We already have this (word identifier is address)
+- We'll be implementing other word identifiers (see below)
 
-**Edge**: connects two vertex if there's false sharing between them
+**Edge**: connects two vertex if there's false sharing between them.
 
-- For now we detect false sharing on object (instead of word) level.
-
-**Labels** on vertices: each vertex holds all the program locations that accesses it.
+**Labels** on vertices: relevant infos, such as program locations, threads, is read or write.
 
 Preferably with *weight* on edges; **weight**: # of times false sharing occurs between the two words.
 
@@ -45,18 +44,10 @@ What kind of stability guarantee do we need?
 #### How to Prove Stability
 
 - Either by proof: can be hard because we may permit slight perturbation instead of full rigidity; how do you argue quantitatively here?
-
 - Or by running multiple times and observe.
+  - We've run `tensor` for 100 times, the result seems not quite stable.
 
 ### List of Challenges/Todos
-
-#### Predator Issues
-
-There are problems with Predator: it's reporting true sharing as false sharing. We may fix it or we may end up writing one of our own.
-
-#### Word-level Granularity
-
-Currently we identify false sharing at object level; we want to do it at word level (because we're actually optimizing at word level)
 
 #### Word Identifiers
 
@@ -73,10 +64,12 @@ Currently we identify false sharing at object level; we want to do it at word le
 - Final solution
 
     - For heap object, use **id of thread0 malloc call + offset**; ignore those cannot be assigned an identifier in this way. This ignores non-main-thread allocation.
-
     - For global object, use **symbol name + offset**.
-
     - For stack object, simply ignore all.
+
+#### Stability of Profile
+
+Take some time observing this.
 
 ## Padding
 
