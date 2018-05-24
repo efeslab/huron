@@ -4,13 +4,19 @@
 # IDEs
 .idea/
 .vscode/
+cmake-build-debug/
 
 # Outputs
 *.log
-*.so
 *.csv
-tensor
-false
 
 # Predator
 predator_obsolete/
+
+# Temp files of NTFS filesystem
+.fuse*
+
+# Built binary and dynamic library
+*.so
+tensor
+false
