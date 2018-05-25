@@ -12,6 +12,30 @@ CACHELINE_SIZE = 64
 def print_addr(addr):
     return '0x{:02x}'.format(addr)
 
+def get_malloc_ids():
+    f = open("mallocIds.csv", 'r')
+    reader = csv.reader(f)
+    mallocIds = []
+    rangeStarts = []
+    rangeEnds = []
+    for row in reader:
+        mallocId = int(row[0])
+        start = int(row[1], 16)
+        end = start + int(row[2])
+        mallocIds.append(mallocId)
+        rangeStarts.append(start)
+        rangeEnds.append(end)
+        pass
+    f.close()
+    return mallocIds, rangeStarts, rangeEnds
+
+mallocIds, rangeStarts, rangeEnds = get_malloc_ids()
+
+def get_malloc_id(addr):
+    for i in range(len(mallocIds)):
+        if rangeStarts[i] <= addr and addr < rangeEnds[i]:
+            return mallocIds[i]
+    return -1
 
 class Record:
     @staticmethod
@@ -30,7 +54,7 @@ class Record:
         thread_str = str(self.thread)
         addr_str = print_addr(self.addr)
         rest = [str(x) for x in [self.func, self.inst, self.size]]
-        return ','.join([cacheline_str, thread_str, addr_str] + rest)
+        return ','.join([cacheline_str, thread_str, addr_str, get_malloc_id(self.addr)] + rest)
 
     def get_addr_range(self):
         return self.addr, self.addr + self.size
@@ -50,10 +74,11 @@ class AddrRecord:
                 self.pc_rw[(rec.func, rec.inst)][0] += 1
 
     def __str__(self):
-        return '(%s, %s)(%d)@%d: %s %s' % (
+        return '(%s, %s)(%d)(%d)@%d: %s %s' % (
             print_addr(self.start),
             print_addr(self.end),
             self.end - self.start,
+            get_malloc_id(self.start),
             self.clid,
             dict(self.thread_rw), dict(self.pc_rw)
         )
