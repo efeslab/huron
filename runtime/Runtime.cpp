@@ -19,6 +19,8 @@ __thread Thread *current;
 
 void *globalStart, *globalEnd;
 void *heapStart = (void *) ((uintptr_t) 1 << 63), *heapEnd;
+unsigned int mallocId = 0;
+FILE * mallocIds = NULL;
 
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
@@ -81,6 +83,7 @@ void initializer(void) {
 #endif
     xthread::getInstance().initialize();
     getGlobalRegion(&globalStart, &globalEnd);
+    mallocIds = fopen("mallocIds.csv", "w");
     printf("globalStart = %p, globalEnd = %p\n", globalStart, globalEnd);
     current->malloc_hook_active = true;
 }
@@ -92,6 +95,7 @@ void finalizer(void) {
         printf("alloc: %p, %lu words\n", (void *) p.first, p.second);
 #endif
     xthread::getInstance().flush_all_thread_logs();
+    if(mallocIds)fclose(mallocIds);
 }
 
 // void alloc_insert_cachelines(void *start, void *end, addr_cache_map_t &map) {}
@@ -104,6 +108,9 @@ void *my_malloc_hook(size_t size, const void *caller) {
     // RAII deactivate malloc hook so that we can use malloc below.
     MallocHookDeactivator deactiv;
     void *alloced = malloc(size);
+    if(getThreadIndex() == 0)mallocId += 1;
+    //mallocStarts.push_back(alloced);
+    //mallocOffsets.push_back(size);
     heapStart = std::min(heapStart, alloced);
     heapEnd = std::max(heapEnd, alloced + size);
     // // Round up `size` to whole number of words.
@@ -114,7 +121,8 @@ void *my_malloc_hook(size_t size, const void *caller) {
     //     (size_round >> word_size_power) * (word_size + 0) // sizeof(WordInfo))
     // );
 #ifdef DEBUG
-    printf("malloc(%lu) called from %p returns %p\n", size, caller, alloced);
+    //printf("malloc(%lu) called from %p returns %p\n", size, caller, alloced);
+    if(getThreadIndex() == 0 && mallocIds)fprintf(mallocIds, "%u, %p, %lu\n", mallocId, alloced, size);
     // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
 #endif
     // Record that range of address.
