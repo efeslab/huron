@@ -28,10 +28,9 @@ void getRegionInfo(std::string &curentry, void **start, void **end) {
     endstr = curentry.substr(endpos, pos - endpos);
 
     // Save this entry to the passed regions.
-    *start = (void *)strtoul(beginstr.c_str(), NULL, 16);
-    *end = (void *)strtoul(endstr.c_str(), NULL, 16);
+    *start = (void *)strtoul(beginstr.c_str(), nullptr, 16);
+    *end = (void *)strtoul(endstr.c_str(), nullptr, 16);
 
-    return;
 }
 
 // Trying to get information about global regions.
@@ -39,9 +38,6 @@ void getGlobalRegion(void **start, void **end) {
     using namespace std;
     ifstream iMapfile;
     string curentry;
-
-    //#define PAGE_ALIGN_DOWN(x) (((size_t) (x)) & ~xdefines::PAGE_SIZE_MASK)
-    // void * globalstart = (void *)PAGE_ALIGN_DOWN(&__data_start);
 
     try {
         iMapfile.open("/proc/self/maps");
@@ -59,42 +55,23 @@ void getGlobalRegion(void **start, void **end) {
     int globalCount = 0;
     int prevRegionNumb = 0;
 
-    bool foundGlobals = false;
-
     while (getline(iMapfile, curentry)) {
         // Check the globals for the application. It is at the first entry
         if (((curentry.find(" rw-p ", 0) != string::npos) ||
-             (curentry.find(" rwxp ", 0) != string::npos)) &&
-            foundGlobals == false) {
+             (curentry.find(" rwxp ", 0) != string::npos))) {
             // Now it is start of global of applications
             getRegionInfo(curentry, &startaddr, &endaddr);
 
-            // fprintf(stderr, "Initially, startaddr %p endaddr %p\n",
-            // startaddr, endaddr);
             getline(iMapfile, nextentry);
 
             void *newstart;
             void *newend;
-            // Check whether next entry should be also included or not.
-            // if(nextentry.find("lib") == string::npos && (nextentry.find(" 08
-            // ") != string::npos)) {
             if (nextentry.find("lib") == string::npos ||
                 (nextentry.find(" rw-p ") != string::npos)) {
-                //          fprintf(stderr, "Initially, nextentry.find %d
-                //          string::npos %d\n", nextentry.find("lib"),
-                //          string::npos); fprintf(stderr, "nextentry.now is
-                //          %s\n", nextentry.c_str());
                 getRegionInfo(nextentry, &newstart, &newend);
-                //          fprintf(stderr, "Initially, startaddr %p endaddr
-                //          %p\n", newstart, endaddr);
             }
             *start = startaddr;
-            if (newstart == endaddr) {
-                *end = newend;
-            } else {
-                *end = endaddr;
-            }
-            foundGlobals = true;
+            *end = newstart == endaddr ? newend : endaddr;
             break;
         }
     }
