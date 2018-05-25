@@ -7,7 +7,7 @@ false: false.c
 
 tensor: tensor_parallel.cpp
 	clang++ -Wl,./libruntime.so -finstrumenter -std=c++11 \
-		-I ../eigen/ -I ./5 -DEIGEN_USE_THREADS -DMSIZE=100 \
+		-I /home/takh/eigen/ -I ./5 -DEIGEN_USE_THREADS -DMSIZE=1000 \
 		tensor_parallel.cpp -lpthread -o tensor  2> build_tensor.log
 
 clean:
