@@ -1,14 +1,36 @@
-SO_PATH = 
+INST := 1
 
-all: false tensor
+all: tensor
 
-false: false.c
-	clang -Wl,./libruntime.so -finstrumenter false.c -lpthread -o false 2> build_false.log
+false_bc: false.c
+	clang -c -emit-llvm false.c -o false.bc
+ifdef INST
+	opt -load LLVMInstrumenter.so -instrumenter < false.bc > false_inst.bc 2> build_false.log
+	mv false_inst.bc false.bc
+endif
 
-tensor: tensor_parallel.cpp
-	clang++ -Wl,./libruntime.so -finstrumenter -std=c++11 \
-		-I ../eigen/ -I ./5 -DEIGEN_USE_THREADS -DMSIZE=100 \
-		tensor_parallel.cpp -lpthread -o tensor  2> build_tensor.log
+false: false_inst
+	llc -filetype=obj false_inst.bc -o false.o
+ifdef INST
+	gcc false.o -Wl,./libruntime.so -lpthread -o false
+else
+	gcc false.o -lpthread -o false
+endif
+
+tensor_bc: tensor_parallel.cpp
+	clang++ -c -emit-llvm -std=c++11 -I ../eigen/ -DEIGEN_USE_THREADS -DMSIZE=500 tensor_parallel.cpp -o tensor.bc
+ifdef INST
+	opt -load LLVMInstrumenter.so -instrumenter < tensor.bc > tensor_inst.bc 2> build_tensor.log
+	mv tensor_inst.bc tensor.bc
+endif
+
+tensor: tensor_bc
+	llc -filetype=obj tensor.bc -o tensor.o
+ifdef INST
+	g++ tensor.o -Wl,./libruntime.so -lpthread -o tensor
+else
+	g++ tensor.o -lpthread -o tensor
+endif
 
 clean:
-	rm -f false tensor
+	rm -f *.bc *.o false tensor

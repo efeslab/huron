@@ -1,6 +1,3 @@
-# Modified C++ std for clang
-5/
-
 # IDEs
 .idea/
 .vscode/
@@ -18,5 +15,10 @@ predator_obsolete/
 
 # Built binary and dynamic library
 *.so
+*.o
+*.bc
 tensor
 false
+
+# Exclude instrumenter dyn lib since it's hard to obtain
+!LLVMInstrumenter.so
