@@ -34,8 +34,8 @@ mallocIds, rangeStarts, rangeEnds = get_malloc_ids()
 def get_malloc_id(addr):
     for i in range(len(mallocIds)):
         if rangeStarts[i] <= addr and addr < rangeEnds[i]:
-            return mallocIds[i]
-    return -1
+            return mallocIds[i], rangeStarts[i], rangeEnds[i]
+    return -1, -1, -1
 
 class Record:
     @staticmethod
@@ -74,11 +74,24 @@ class AddrRecord:
                 self.pc_rw[(rec.func, rec.inst)][0] += 1
 
     def __str__(self):
-        return '(%s, %s)(%d)(%d)@%d: %s %s' % (
-            print_addr(self.start),
-            print_addr(self.end),
+        malloc_id, malloc_start, malloc_end = get_malloc_id(self.start)
+        start_offset = self.start
+        end_offset = self.end
+        isInSameMalloc = 1
+        if malloc_id == -1:
+            # do nothing
+            pass
+        else:
+            start_offset -= malloc_start
+            if malloc_end < end_offset:
+                isInSameMalloc = -1
+            end_offset -= malloc_start
+        return '(%d, %d)(%d)(%d)(%d)@%d: %s %s' % (
+            start_offset,
+            end_offset,
             self.end - self.start,
-            get_malloc_id(self.start),
+            malloc_id,
+            isInSameMalloc,
             self.clid,
             dict(self.thread_rw), dict(self.pc_rw)
         )
