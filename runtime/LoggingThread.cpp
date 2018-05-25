@@ -10,8 +10,9 @@ void Thread::flush_log() {
         sprintf(filename, log_file_name_template, this->index);
         this->buffer_f = fopen(filename, "a");
         if (!this->buffer_f) {
-            fprintf(stderr, "Cannot open file!!\n");
-            exit(1);
+            fprintf(stderr, "Cannot open file!!\n");//TODO: there is a problem here with main-0 thread
+            //exit(1);
+            return;
         }
     }
     for (int i = 0; i < this->output_n; i++) {
