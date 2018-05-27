@@ -27,46 +27,48 @@ Allocate and manage thread index.
 #ifndef _XTHREAD_H_
 #define _XTHREAD_H_
 
+#include <cassert>
 #include <cstdio>
 #include <new>
 #include <mutex>
 #include <sys/types.h>
+#include <dlfcn.h>
 #include <cstring>
 
 #include "LoggingThread.h"
 
 const int MAX_THREADS = 64;
 
-extern "C" __thread Thread *current;
+__thread Thread *current;
 
-inline int getThreadIndex(void) {
+inline int getThreadIndex() {
     return current->index;
 }
 
-int __internal_pthread_create(pthread_t* t1, const pthread_attr_t* t2, 
-                                void *(*t3)(void*), void* t4) {
-    typedef int (*p_create_t)(pthread_t*, const pthread_attr_t*, void *(*)(void*), void*);
+int __internal_pthread_create(pthread_t *t1, const pthread_attr_t *t2,
+                              void *(*t3)(void *), void *t4) {
+    typedef int (*p_create_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
     static p_create_t _pthread_create_ptr;
     if (_pthread_create_ptr == nullptr) {
         void *lib_handle = dlopen("libpthread.so.0", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-        if (lib_handle == NULL) {
+        if (lib_handle == nullptr) {
             fprintf(stderr, "Unable to load libpthread.so.0\n");
             exit(2);
         }
-        _pthread_create_ptr = (p_create_t)dlsym(lib_handle, "pthread_create");
+        _pthread_create_ptr = (p_create_t) dlsym(lib_handle, "pthread_create");
         assert(_pthread_create_ptr);
     }
     return _pthread_create_ptr(t1, t2, t3, t4);
 }
+
 class xthread {
 private:
-    xthread() 
-    { }
+    xthread() = default;
 
 public:
-    static xthread& getInstance() {
+    static xthread &getInstance() {
         static char buf[sizeof(xthread)];
-        static xthread * theOneTrueObject = new (buf) xthread();
+        static auto *theOneTrueObject = new(buf) xthread();
         return *theOneTrueObject;
     }
 
@@ -76,90 +78,90 @@ public:
         _threadIndex = 0;
 
         _totalThreads = MAX_THREADS;
-    
-        pthread_mutex_init(&_lock, NULL);
+
+        pthread_mutex_init(&_lock, nullptr);
 
         // Shared the threads information. 
         memset(&_threads, 0, sizeof(_threads));
 
         // Initialize all mutex.
-        Thread * thisThread;
-    
-        for(int i = 0; i < _totalThreads; i++) {
-        thisThread = &_threads[i];
-    
-        thisThread->available = true;
+        Thread *thisThread;
+
+        for (int i = 0; i < _totalThreads; i++) {
+            thisThread = &_threads[i];
+
+            thisThread->available = true;
         }
 
         // Allocate the threadindex for current thread.
-        initInitialThread(); 
+        initInitialThread();
     }
 
     // Initialize the first threadd
-    void initInitialThread(void) {
+    void initInitialThread() {
         int tindex;
-        
+
         // Allocate a global thread index for current thread.
         tindex = allocThreadIndex();
 
         // First, xdefines::MAX_ALIVE_THREADS is too small.
-        if(tindex == -1) {
+        if (tindex == -1) {
             fprintf(stderr, "The alive threads is larger than xefines::MAX_THREADS larger!!\n");
             assert(0);
         }
 
         // Get corresponding Thread structure.
-        current  = getThreadInfo(tindex);
+        current = getThreadInfo(tindex);
 
         current->index = tindex;
-        current->self  = pthread_self();
+        current->self = pthread_self();
         current->malloc_hook_active = false;
     }
 
-    Thread * getThreadInfo(int index) {
+    Thread *getThreadInfo(int index) {
         assert(index < _totalThreads);
         return &_threads[index];
     }
 
     // Allocate a thread index under the protection of global lock
-    int allocThreadIndex(void) {
-    int index = -1;
+    int allocThreadIndex() {
+        int index = -1;
 
-        if(_aliveThreads >= _totalThreads) {
-        fprintf(stderr, "Set xdefines::MAX_THREADS to larger. _alivethreads %d totalthreads %d", _aliveThreads, _totalThreads);
-        abort(); 
-        } 
+        if (_aliveThreads >= _totalThreads) {
+            fprintf(stderr, "Set xdefines::MAX_THREADS to larger. _alivethreads %d totalthreads %d", _aliveThreads,
+                    _totalThreads);
+            abort();
+        }
 
         int origindex = _threadIndex;
-    //		fprintf(stderr, "threadindex %d\n", _threadIndex);
-        Thread * thread;
-        while(true) {  
-        thread = getThreadInfo(_threadIndex);
-        if(thread->available) {
-            thread->available = false;
-            index = _threadIndex;
-            
-            // A thread is counted as alive when its structure is allocated.
-            _aliveThreads++;
+        //		fprintf(stderr, "threadindex %d\n", _threadIndex);
+        Thread *thread;
+        while (true) {
+            thread = getThreadInfo(_threadIndex);
+            if (thread->available) {
+                thread->available = false;
+                index = _threadIndex;
 
-            _threadIndex = (_threadIndex+1)%_totalThreads;
-            break;
+                // A thread is counted as alive when its structure is allocated.
+                _aliveThreads++;
+
+                _threadIndex = (_threadIndex + 1) % _totalThreads;
+                break;
+            } else {
+                _threadIndex = (_threadIndex + 1) % _totalThreads;
+            }
+
+            // It is impossible that we search the whole array and we can't find
+            // an available slot.
+            assert(_threadIndex != origindex);
         }
-        else {
-            _threadIndex = (_threadIndex+1)%_totalThreads;
-        }
-        
-        // It is impossible that we search the whole array and we can't find
-        // an available slot. 
-        assert(_threadIndex != origindex); 
-        }
-        return index; 
+        return index;
     }
 
     /// Create the wrapper 
     /// @ Intercepting the thread_creation operation.
-    int thread_create(pthread_t * tid, const pthread_attr_t * attr, threadFunction * fn, void * arg) {
-        void * ptr = NULL;
+    int thread_create(pthread_t *tid, const pthread_attr_t *attr, threadFunction *fn, void *arg) {
+        void *ptr = nullptr;
         int tindex;
         int result;
 
@@ -168,16 +170,16 @@ public:
 
         // Allocate a global thread index for current thread.
         tindex = allocThreadIndex();
-        
+
         // First, xdefines::MAX_ALIVE_THREADS is too small.
-        if(tindex == -1) {
+        if (tindex == -1) {
             fprintf(stderr, "The alive threads is larger than xefines::MAX_THREADS larger!!\n");
             assert(0);
         }
-    
+
         // Get corresponding Thread structure.
-        Thread * children = getThreadInfo(tindex);
-        
+        Thread *children = getThreadInfo(tindex);
+
         children->index = tindex;
         children->startRoutine = fn;
         children->startArg = arg;
@@ -185,19 +187,19 @@ public:
 
         global_unlock();
 
-        result = __internal_pthread_create(tid, attr, startThread, (void *)children);
+        result = __internal_pthread_create(tid, attr, startThread, (void *) children);
 
         // Set up the thread index in the local thread area.
         return result;
-    }      
+    }
 
 
     // @Global entry of all entry function.
-    static void * startThread(void * arg) {
-        void * result;
+    static void *startThread(void *arg) {
+        void *result;
 
-        current = (Thread *)arg;
-    //    current->tid = gettid();
+        current = (Thread *) arg;
+        //    current->tid = gettid();
         current->self = pthread_self();
 
         // from the TLS storage.
@@ -205,34 +207,35 @@ public:
 
         // Decrease the alive threads
         xthread::getInstance().removeThread(current);
-        
+
         return result;
     }
 
     void flush_all_thread_logs() {
-        for (int i = 0; i < MAX_THREADS; i++)
-            _threads[i].flush_log();
+        for (auto &_thread : _threads)
+            _thread.flush_log();
     }
+
 private:
     /// @brief Lock the lock.
-    void global_lock(void) {
+    void global_lock() {
         pthread_mutex_lock(&_lock);
     }
 
     /// @brief Unlock the lock.
-    void global_unlock(void) {
+    void global_unlock() {
         pthread_mutex_unlock(&_lock);
     }
-    
-    void removeThread(Thread * thread) {
-    //  fprintf(stderr, "remove thread %p with thread index %d\n", thread, thread->index);
+
+    void removeThread(Thread *thread) {
+        //  fprintf(stderr, "remove thread %p with thread index %d\n", thread, thread->index);
         global_lock();
 
         current->available = true;
         --_aliveThreads;
 
-        if(_aliveThreads == 0) {
-        // isMultithreading = false;
+        if (_aliveThreads == 0) {
+            // isMultithreading = false;
         }
 
         global_unlock();
@@ -241,9 +244,9 @@ private:
     pthread_mutex_t _lock;
     int _threadIndex;
     int _aliveThreads;
-    int _totalThreads;  
+    int _totalThreads;
     // Total threads we can support is MAX_THREADS
-    Thread  _threads[MAX_THREADS];
+    Thread _threads[MAX_THREADS];
 };
 
 #endif

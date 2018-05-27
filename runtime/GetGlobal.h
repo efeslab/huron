@@ -28,8 +28,8 @@ void getRegionInfo(std::string &curentry, void **start, void **end) {
     endstr = curentry.substr(endpos, pos - endpos);
 
     // Save this entry to the passed regions.
-    *start = (void *)strtoul(beginstr.c_str(), nullptr, 16);
-    *end = (void *)strtoul(endstr.c_str(), nullptr, 16);
+    *start = (void *) strtoul(beginstr.c_str(), nullptr, 16);
+    *end = (void *) strtoul(endstr.c_str(), nullptr, 16);
 
 }
 

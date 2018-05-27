@@ -16,7 +16,7 @@ void Thread::flush_log() {
     }
     for (int i = 0; i < this->output_n; i++) {
         const auto &rec = this->outputBuf[i];
-        fprintf(this->buffer_f, "%d,%p,%d,%d,%d,%s\n", this->index, (void *)rec.addr,
+        fprintf(this->buffer_f, "%d,%p,%d,%d,%d,%s\n", this->index, (void *) rec.addr,
                 rec.func_id, rec.inst_id, rec.size, (rec.is_write ? "true" : "false"));
     }
     this->output_n = 0;

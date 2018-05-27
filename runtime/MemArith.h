@@ -11,7 +11,7 @@ const unsigned long cacheline_size_power = 6;
 const unsigned long word_size_power = 2, word_size = 4;
 
 cacheline_id_t get_cache_line_id(void *addr) {
-    return (cacheline_id_t)(addr) >> cacheline_size_power;
+    return (cacheline_id_t) (addr) >> cacheline_size_power;
 }
 
 bool is_word_aligned(uintptr_t addr) {
@@ -19,9 +19,9 @@ bool is_word_aligned(uintptr_t addr) {
 }
 
 uintptr_t round_up_size(size_t size) {
-    return is_word_aligned(size) 
-        ? size 
-        : ((size >> word_size_power) + 1) * word_size;
+    return is_word_aligned(size)
+           ? size
+           : ((size >> word_size_power) + 1) * word_size;
 }
 
 // WordInfo *get_word_info(uintptr_t start, size_t total_words, uintptr_t addr) {
