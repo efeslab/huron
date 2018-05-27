@@ -6,6 +6,7 @@
 #define RUNTIME_MALLOCINFO_H
 
 #include <map>
+#include <sstream>
 
 struct MallocIdSize {
     size_t id, size;
@@ -27,6 +28,20 @@ public:
 
     void insert(uintptr_t start, size_t size) {
         data.emplace(start, MallocIdSize(malloc_id++, size));
+    }
+
+    MallocIdSize find_id_offset(uintptr_t addr) {
+        // Find the first starting address greater than `addr`, then it--
+        // to get where `addr` falls in.
+        auto it = data.upper_bound(addr);
+        if (it != data.begin()) {
+            it--;
+            if (it->first + it->second.size > addr)
+                return {it->second.id, addr - it->first};
+        }
+        std::stringstream stream;
+        stream << "Address " << "0x" << std::hex << addr << " does not point to malloc'ed object!";
+        throw std::invalid_argument(stream.str());
     }
 };
 
