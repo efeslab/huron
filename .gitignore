@@ -19,6 +19,3 @@ predator_obsolete/
 *.bc
 tensor
 false
-
-# Exclude instrumenter dyn lib since it's hard to obtain
-!LLVMInstrumenter.so
