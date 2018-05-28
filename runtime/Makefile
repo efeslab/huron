@@ -4,6 +4,9 @@ INCLUDE_DIR = .
 SRCS =  $(SOURCE_DIR)/Runtime.cpp   \
 		$(SOURCE_DIR)/LoggingThread.cpp
 
+SPSRC = $(SOURCE_DIR)/SecondPass.cpp \
+    $(SOURCE_DIR)/LoggingThread.cpp
+
 INCS =  $(INCLUDE_DIR)/MemArith.h 		 \
 		$(INCLUDE_DIR)/xthread.h       \
     $(INCLUDE_DIR)/CacheLine.h
@@ -16,12 +19,15 @@ CFLAGS   = -fno-omit-frame-pointer -DDEBUG
 CFLAGS32 = $(CFLAGS) -m32 -DX86_32BIT # -O3
 CFLAGS64 = $(CFLAGS) #-m64 # -O3
 
-TARGETS = libruntime.so
+TARGETS = libruntime.so secondpass.so
 
 all: $(TARGETS)
 
 libruntime.so: $(DEPS)
 	$(CXX) $(CFLAGS64) $(INCLUDE_DIRS) -shared -fPIC $(SRCS) -o libruntime.so -ldl -lpthread
+
+secondpass.so: $(DEPS)
+	$(CXX) $(CFLAGS64) $(INCLUDE_DIRS) -shared -fPIC $(SPSRC) -o secondpass.so -ldl -lpthread
 
 clean:
 	rm -f $(TARGETS)
