@@ -38,7 +38,7 @@ public:
     }
     unsigned int id;
     MallocInformation *currentMalloc;
-    while(fscanf(fp, "%u", &id))
+    while(fscanf(fp, "%u", &id) != EOF)
     {
       currentMalloc = new MallocInformation;
       currentMalloc->id = id;
@@ -53,9 +53,12 @@ public:
     }
     currentIndex = 0;
     size = allMallocs.size();
+    //printf("%d\n",size);
+    fclose(fp);
   }
   void push_new_malloc(unsigned int id, void * start, size_t size)
   {
+    //printf("%d %p %d\n", id, start, size);
     if(currentIndex >= size)return;
     else if(id<allMallocs[currentIndex]->id)return;
     else if (id > allMallocs[currentIndex]->id)printf("Error while pushing new malloc");
