@@ -75,8 +75,8 @@ public:
 
     /// @brief Initialize the system.
     void initialize() {
-        _aliveThreads = _maxUsed = _threadIndex = 0;
-        _totalThreads = MAX_THREADS;
+        _aliveThreads = 1;
+        isMultithreading = false;
 
         pthread_mutex_init(&_lock, nullptr);
 
@@ -86,10 +86,8 @@ public:
         // Initialize all mutex.
         Thread *thisThread;
 
-        for (int i = 0; i < _totalThreads; i++) {
-            thisThread = &_threads[i];
-
-            thisThread->available = true;
+        for (auto &_thread : _threads) {
+            thisThread = &_thread;
         }
 
         // Allocate the threadindex for current thread.
@@ -101,7 +99,7 @@ public:
         int tindex;
 
         // Allocate a global thread index for current thread.
-        tindex = allocThreadIndex();
+        tindex = _threadIndex++;
 
         // First, xdefines::MAX_ALIVE_THREADS is too small.
         if (tindex == -1) {
@@ -118,44 +116,8 @@ public:
     }
 
     Thread *getThreadInfo(int index) {
-        assert(index < _totalThreads);
+        assert(index < MAX_THREADS);
         return &_threads[index];
-    }
-
-    // Allocate a thread index under the protection of global lock
-    int allocThreadIndex() {
-        int index = -1;
-
-        if (_aliveThreads >= _totalThreads) {
-            fprintf(stderr, "Set xdefines::MAX_THREADS to larger. _alivethreads %d totalthreads %d", _aliveThreads,
-                    _totalThreads);
-            abort();
-        }
-
-        int origindex = _threadIndex;
-        //		fprintf(stderr, "threadindex %d\n", _threadIndex);
-        Thread *thread;
-        while (true) {
-            thread = getThreadInfo(_threadIndex);
-            if (thread->available) {
-                thread->available = false;
-                index = _threadIndex;
-
-                // A thread is counted as alive when its structure is allocated.
-                _aliveThreads++;
-                _maxUsed++;
-
-                _threadIndex = (_threadIndex + 1) % _totalThreads;
-                break;
-            } else {
-                _threadIndex = (_threadIndex + 1) % _totalThreads;
-            }
-
-            // It is impossible that we search the whole array and we can't find
-            // an available slot.
-            assert(_threadIndex != origindex);
-        }
-        return index;
     }
 
     /// Create the wrapper 
@@ -168,14 +130,15 @@ public:
         // Lock and record
         global_lock();
 
-        // Allocate a global thread index for current thread.
-        tindex = allocThreadIndex();
-
-        // First, xdefines::MAX_ALIVE_THREADS is too small.
-        if (tindex == -1) {
-            fprintf(stderr, "The alive threads is larger than xefines::MAX_THREADS larger!!\n");
-            assert(0);
+        if (_threadIndex >= MAX_THREADS) {
+            fprintf(stderr, "Set xdefines::MAX_THREADS to larger. _alivethreads %d MAX_THREADS %d",
+                    _aliveThreads, MAX_THREADS);
+            abort();
         }
+        // Allocate a global thread index for current thread.
+        tindex = _threadIndex++;
+        _aliveThreads++;
+        isMultithreading = true;
 
         // Get corresponding Thread structure.
         Thread *children = getThreadInfo(tindex);
@@ -212,17 +175,20 @@ public:
     }
 
     void flush_all_concat_to(const std::string &output_name) {
-        std::string cat_cmd = "cat ";
-        for (int i = 0; i < _maxUsed; i++) {
-            // If the thread is ever used, we flush its log, and
-            // build cmd string to cat these files to one file.
-            _threads[i].flush_log();
-            cat_cmd += _threads[i].get_filename() + " ";
-        }
-        cat_cmd += " > " + output_name;
-        if (system(cat_cmd.c_str()))
-            throw std::system_error();
-        for (int i = 0; i < _maxUsed; i++) {
+        // Should be run with all other threads finished.
+        assert(!isMultithreading);
+        // Then we first flush ourselves,
+        _threads[0].flush_log();
+        // and append files together. Remember to CLOSE all the files to apply changes.
+        for (int i = 0; i < _threadIndex; i++) {
+            _threads[i].close_buffer();
+            std::string cat_cmd = "cat " + _threads[i].get_filename() + " >> " + output_name;
+            if (system(cat_cmd.c_str()))
+                throw std::system_error();
+            std::string wc_cmd = "wc -l " + _threads[i].get_filename();
+            system(wc_cmd.c_str());
+            std::string wc_out_cmd = "wc -l " + output_name;
+            system(wc_out_cmd.c_str());
             std::string rm_cmd = "rm " + _threads[i].get_filename();
             if (system(rm_cmd.c_str()))
                 throw std::system_error();
@@ -241,24 +207,21 @@ private:
     }
 
     void removeThread(Thread *thread) {
-        //  fprintf(stderr, "remove thread %p with thread index %d\n", thread, thread->index);
         global_lock();
 
-        current->available = true;
-        --_aliveThreads;
+        // Flush thread log file.
+        thread->flush_log();
 
-        if (_aliveThreads == 0) {
-            // isMultithreading = false;
-        }
+        --_aliveThreads;
+        if (_aliveThreads == 1)
+            isMultithreading = false;
 
         global_unlock();
     }
 
     pthread_mutex_t _lock;
-    int _threadIndex;
-    int _maxUsed;
-    int _aliveThreads;
-    int _totalThreads;
+    int _threadIndex, _aliveThreads;
+    bool isMultithreading;
     // Total threads we can support is MAX_THREADS
     Thread _threads[MAX_THREADS];
 };

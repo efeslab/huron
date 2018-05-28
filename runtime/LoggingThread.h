@@ -33,7 +33,7 @@ struct Thread {
     FILE *buffer_f;
     // Results of pthread_self
     pthread_t self;
-    // The following is the parameter about starting function. 
+    // The following is the parameter about starting function.
     threadFunction *startRoutine;
     void *startArg;
     // We used this to record the stack range
@@ -41,8 +41,6 @@ struct Thread {
     // void * stackTop;
     // index of this thread object.
     int index;
-    // True: the thread index is free.
-    bool available;
     // True: malloc will call our malloc_hook.
     bool malloc_hook_active;
 
@@ -51,6 +49,8 @@ struct Thread {
     void log_load_store(const RWRecord &rw);
 
     std::string get_filename();
+
+    void close_buffer();
 };
 
 #endif

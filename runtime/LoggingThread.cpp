@@ -1,8 +1,5 @@
 #include "LoggingThread.h"
 
-// File name of the logging file.
-const char log_file_name_template[] = "%d.log";
-
 void Thread::flush_log() {
     if (!this->buffer_f) {
         auto filename = get_filename();
@@ -27,4 +24,8 @@ void Thread::log_load_store(const RWRecord &rw) {
 
 std::string Thread::get_filename() {
     return "__record__" + std::to_string(this->index) + ".log";
+}
+
+void Thread::close_buffer() {
+    fclose(this->buffer_f);
 }
