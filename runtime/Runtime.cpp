@@ -87,7 +87,6 @@ void finalizer(void) {
     for (const auto &p: allCacheLineInfo)
         delete p.second;
     xthread::getInstance().flush_all_thread_logs();
-    malloc_sizes.dump();
 }
 
 void *my_malloc_hook(size_t size, const void *caller) {
