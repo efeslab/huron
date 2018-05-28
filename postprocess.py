@@ -96,6 +96,14 @@ class AddrRecord:
             self.clid,
             dict(self.thread_rw), dict(self.pc_rw)
         )
+    def getKeys(self):
+       return set(self.pc_rw.keys())
+
+    def getMallocInformation(self):
+       malloc_id, malloc_start, malloc_end = get_malloc_id(self.start)
+       if malloc_id == -1:
+           return -1,-1
+       return (malloc_id,self.start-malloc_start)
 
     @staticmethod
     def from_cacheline_records(clid, records):
@@ -212,11 +220,30 @@ class Graph:
         import io
         with io.StringIO() as output:
             for v0 in self.v:
-                print(v0, file=output)
-            for e0 in self.e:
-                print(e0, file=output, sep=' ')
-            print('\n\n\n', file=output)
+                print(v0, file=output, end='')
+            #for e0 in self.e:
+            #    print(e0, file=output, sep=' ')
+            # print('\n', file=output)
             return output.getvalue()
+    def getPCInformation(self):
+        dict = {}
+        for v0 in self.v:
+            keys = v0.getKeys()
+            for key in keys:
+                if key not in dict:
+                    dict[key]=True
+        return set(dict.keys())
+    def getMallocInformation(self):
+        mallocs = {}
+        for v0 in self.v:
+           mallocId, offset = v0.getMallocInformation()
+           if mallocId == -1:
+               continue
+           if mallocId not in mallocs:
+               mallocs[mallocId] = {offset: True}
+           else:
+               mallocs[mallocId][offset] = True
+        return mallocs
 
     def is_complete_graph(self):
         return len(self.e) == len(self.v) * (len(self.v) - 1) / 2
@@ -254,10 +281,38 @@ def print_final(path, graphs):
     suffix = '_output'
     root, ext = os.path.splitext(path)
     output_file = root + suffix + ext
+    dict = {}
+    for g in graphs:
+        keys = g.getPCInformation()
+        for key in keys:
+            if key not in dict:
+                dict[key]=True
+    pcs = sorted(list(dict.keys()))
     with open(output_file, 'w') as f:
-        for g in graphs:
-            print(g, file=f)
+        for pc in pcs:
+            print(str(pc[0])+' '+str(pc[1]), file=f)
 
+def print_malloc_final(path, graphs):
+    suffix = '_malloc'
+    root, ext = os.path.splitext(path)
+    output_file = root + suffix + ext
+    mallocs = {}
+    for g in graphs:
+        malloc = g.getMallocInformation()
+        for mallocId in malloc:
+            if mallocId not in mallocs:
+                mallocs[mallocId] = malloc[mallocId]
+            else:
+                for offset in malloc[mallocId]:
+                    if offset not in mallocs[mallocId]:
+                        mallocs[mallocId][offset] = True
+    with open(output_file, "w") as file:
+        for malloc in mallocs:
+            print(malloc, file=file)
+            print(len(mallocs[malloc]), file=file)
+            for i in sorted(mallocs[malloc].keys()):
+                print(i,file=file,end=' ')
+            print('',file=file)
 
 def sanity_check(groups, addrrec_groups):
     assert len(groups) == len(addrrec_groups)
@@ -307,6 +362,7 @@ def main():
     # print_first_pass(path, groups)
     # print_second_pass(path, addrrec_groups)
     print_final(path, graphs)
+    print_malloc_final(path, graphs)
 
     stats = n, single_n, noedge_n, minimal_n, n - single_n - noedge_n - minimal_n
     print("""
