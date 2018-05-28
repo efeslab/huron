@@ -49,6 +49,8 @@ struct Thread {
     void flush_log();
 
     void log_load_store(const RWRecord &rw);
+
+    std::string get_filename();
 };
 
 #endif

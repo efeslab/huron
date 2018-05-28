@@ -1,13 +1,12 @@
 #include "LoggingThread.h"
 
 // File name of the logging file.
-const char log_file_name_template[] = "__record__%d.log";
+const char log_file_name_template[] = "%d.log";
 
 void Thread::flush_log() {
     if (!this->buffer_f) {
-        char filename[100];
-        sprintf(filename, log_file_name_template, this->index);
-        this->buffer_f = fopen(filename, "a");
+        auto filename = get_filename();
+        this->buffer_f = fopen(filename.c_str(), "a");
         if (!this->buffer_f) {
             fprintf(stderr, "Cannot open file!!\n");//TODO: there is a problem here with main-0 thread
             //exit(1);
@@ -24,4 +23,8 @@ void Thread::log_load_store(const RWRecord &rw) {
     if (this->output_n == LOG_SIZE)
         this->flush_log();
     this->outputBuf[this->output_n++] = rw;
+}
+
+std::string Thread::get_filename() {
+    return "__record__" + std::to_string(this->index) + ".log";
 }

@@ -34,6 +34,7 @@ Allocate and manage thread index.
 #include <sys/types.h>
 #include <dlfcn.h>
 #include <cstring>
+#include <cstdlib>
 
 #include "LoggingThread.h"
 
@@ -74,9 +75,7 @@ public:
 
     /// @brief Initialize the system.
     void initialize() {
-        _aliveThreads = 0;
-        _threadIndex = 0;
-
+        _aliveThreads = _maxUsed = _threadIndex = 0;
         _totalThreads = MAX_THREADS;
 
         pthread_mutex_init(&_lock, nullptr);
@@ -144,6 +143,7 @@ public:
 
                 // A thread is counted as alive when its structure is allocated.
                 _aliveThreads++;
+                _maxUsed++;
 
                 _threadIndex = (_threadIndex + 1) % _totalThreads;
                 break;
@@ -211,9 +211,22 @@ public:
         return result;
     }
 
-    void flush_all_thread_logs() {
-        for (auto &_thread : _threads)
-            _thread.flush_log();
+    void flush_all_concat_to(const std::string &output_name) {
+        std::string cat_cmd = "cat ";
+        for (int i = 0; i < _maxUsed; i++) {
+            // If the thread is ever used, we flush its log, and
+            // build cmd string to cat these files to one file.
+            _threads[i].flush_log();
+            cat_cmd += _threads[i].get_filename() + " ";
+        }
+        cat_cmd += " > " + output_name;
+        if (system(cat_cmd.c_str()))
+            throw std::system_error();
+        for (int i = 0; i < _maxUsed; i++) {
+            std::string rm_cmd = "rm " + _threads[i].get_filename();
+            if (system(rm_cmd.c_str()))
+                throw std::system_error();
+        }
     }
 
 private:
@@ -243,6 +256,7 @@ private:
 
     pthread_mutex_t _lock;
     int _threadIndex;
+    int _maxUsed;
     int _aliveThreads;
     int _totalThreads;
     // Total threads we can support is MAX_THREADS
