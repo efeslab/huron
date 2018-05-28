@@ -45,8 +45,8 @@ class Record:
     def __init__(self, line):
         self.thread = int(line[0])
         self.addr = int(line[1], 16)
-        [self.func, self.inst, self.size] = [int(xstr) if xstr != '_' else -1 for xstr in line[2:5]]
-        self.is_write = bool(line[5])
+        [self.func, self.inst, self.size] = [int(xstr) for xstr in line[2:4] + line[6:7]]
+        self.is_write = bool(line[7])
         self.cacheline = Record._calc_cacheline_id(self.addr)
 
     def __str__(self):
@@ -86,12 +86,13 @@ class AddrRecord:
             if malloc_end < end_offset:
                 isInSameMalloc = -1
             end_offset -= malloc_start
-        return '(%d, %d)(%d)(%d)(%d)@%d: %s %s' % (
+        return '(%d, %d)(%d)(%d)(%d)(%d)@%d: %s %s' % (
             start_offset,
             end_offset,
             self.end - self.start,
             malloc_id,
             isInSameMalloc,
+            self.start // CACHELINE_SIZE == self.end // CACHELINE_SIZE,
             self.clid,
             dict(self.thread_rw), dict(self.pc_rw)
         )
