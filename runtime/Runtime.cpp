@@ -164,7 +164,8 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                 return;
             }
         } else
-            rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
+            return;
+            //rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
         current->log_load_store(rec);
     }
 }

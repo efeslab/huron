@@ -2,12 +2,11 @@ SOURCE_DIR = .
 INCLUDE_DIR = .
 
 SRCS =  $(SOURCE_DIR)/Runtime.cpp   \
-		$(SOURCE_DIR)/LoggingThread.cpp  \
-		$(SOURCE_DIR)/CacheLine.cpp
+		$(SOURCE_DIR)/LoggingThread.cpp
 
-INCS =  $(INCLUDE_DIR)/CustomAllocator.h \
-		$(INCLUDE_DIR)/MemArith.h 		 \
-		$(INCLUDE_DIR)/xthread.h
+INCS =  $(INCLUDE_DIR)/MemArith.h 		 \
+		$(INCLUDE_DIR)/xthread.h       \
+    $(INCLUDE_DIR)/CacheLine.h
 
 DEPS = $(SRCS) $(INCS)
 

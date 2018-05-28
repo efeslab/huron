@@ -45,7 +45,7 @@ class Record:
     def __init__(self, line):
         self.thread = int(line[0])
         self.addr = int(line[1], 16)
-        [self.func, self.inst, self.size] = [int(xstr) for xstr in line[2:5]]
+        [self.func, self.inst, self.size] = [int(xstr) if xstr != '_' else -1 for xstr in line[2:5]]
         self.is_write = bool(line[5])
         self.cacheline = Record._calc_cacheline_id(self.addr)
 
@@ -295,7 +295,7 @@ def main():
         for clid, group in groups
     ]
 
-    sanity_check(groups, addrrec_groups)
+    # sanity_check(groups, addrrec_groups)
 
     graphs = [Graph(clid, group) for clid, group in addrrec_groups]
     noedge_n, graphs = filter_count(graphs, lambda g: not g.is_complete_graph())
