@@ -9,8 +9,8 @@ ifdef INST
 	mv false_inst.bc false.bc
 endif
 
-false: false_inst
-	llc -filetype=obj false_inst.bc -o false.o
+false: false_bc
+	llc -filetype=obj false.bc -o false.o
 ifdef INST
 	gcc false.o -Wl,./libruntime.so -lpthread -o false
 else
@@ -18,7 +18,7 @@ else
 endif
 
 tensor_bc: tensor_parallel.cpp
-	clang++ -c -emit-llvm -std=c++11 -I ../eigen/ -DEIGEN_USE_THREADS -DMSIZE=50 tensor_parallel.cpp -o tensor.bc
+	clang++ -c -emit-llvm -std=c++11 -I ../eigen/ -DEIGEN_USE_THREADS tensor_parallel.cpp -o tensor.bc
 ifdef INST
 	opt -load ./LLVMInstrumenter.so -instrumenter < tensor.bc > tensor_inst.bc 2> build_tensor.log
 	mv tensor_inst.bc tensor.bc
