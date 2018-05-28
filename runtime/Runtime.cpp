@@ -153,21 +153,23 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
         cl_ptr = found->second;
     isInstrumented = is_write ? cl_ptr->store(getThreadIndex()) : cl_ptr->load(getThreadIndex());
     if (isInstrumented) {
-        RWRecord rec;
-        if (is_heap) {
-            try {
-                MallocIdSize id_offset = malloc_sizes.find_id_offset(addr);
-                rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write,
-                               (uint32_t) id_offset.id, id_offset.size);
-            }
-            catch (std::invalid_argument&) {
-                return;
-            }
-        } else
-            return;
-            //rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
+        RWRecord rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
         current->log_load_store(rec);
     }
+//        RWRecord rec;
+//        if (is_heap) {
+//            try {
+//                MallocIdSize id_offset = malloc_sizes.find_id_offset(addr);
+//                rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write,
+//                               (uint32_t) id_offset.id, id_offset.size);
+//            }
+//            catch (std::invalid_argument&) {
+//                return;
+//            }
+//        } else
+//            return;
+            //rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
+
 }
 
 // Intercept the pthread_create function.

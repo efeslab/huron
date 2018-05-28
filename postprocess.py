@@ -45,8 +45,8 @@ class Record:
     def __init__(self, line):
         self.thread = int(line[0])
         self.addr = int(line[1], 16)
-        [self.func, self.inst, self.size] = [int(xstr) for xstr in line[2:4] + line[6:7]]
-        self.is_write = bool(line[7])
+        [self.func, self.inst, self.size] = [int(xstr) for xstr in line[2:5]]
+        self.is_write = bool(line[5])
         self.cacheline = Record._calc_cacheline_id(self.addr)
 
     def __str__(self):
