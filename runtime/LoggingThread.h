@@ -20,7 +20,7 @@ struct RWRecord {
     RWRecord() = default;
 
     void dump(FILE *fd, int thread_fd) {
-        fprintf(fd, "%d,%p,%u,%u,_,_,%u,%s\n", thread_fd, (void *) addr, func_id, inst_id, size,
+        fprintf(fd, "%d,%p,%u,%u,%u,%s\n", thread_fd, (void *) addr, func_id, inst_id, size,
                 (is_write ? "true" : "false"));
     }
 };
