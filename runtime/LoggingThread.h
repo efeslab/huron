@@ -7,7 +7,7 @@
 
 typedef void *threadFunction(void *);
 
-const size_t LOG_SIZE = 1 << 19;
+const size_t LOG_SIZE = 1 << 15;
 
 struct RWRecord {
     uintptr_t addr;

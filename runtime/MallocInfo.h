@@ -18,12 +18,15 @@ class MallocInfo {
     // This is an (ordered) map because we need to query lower bound for incoming access addresses.
     std::map<uintptr_t, MallocIdSize> data;
     size_t malloc_id;
+    FILE *file;
 public:
-    MallocInfo() : malloc_id(0) {}
+    MallocInfo() : malloc_id(0) {
+        file = fopen("mallocIds.csv", "w");
+    }
 
     void dump() {
         for (auto &p : data)
-            printf("alloc(%lu): %p+%lu\n", p.second.id, (void *) p.first, p.second.size);
+            fprintf(file, "%lu,%p,%lu\n", p.second.id, (void *) p.first, p.second.size);
     }
 
     void insert(uintptr_t start, size_t size) {
@@ -39,9 +42,12 @@ public:
             if (it->first + it->second.size > addr)
                 return {it->second.id, addr - it->first};
         }
-        std::stringstream stream;
-        stream << "Address " << "0x" << std::hex << addr << " does not point to malloc'ed object!";
-        throw std::invalid_argument(stream.str());
+        throw std::invalid_argument("");
+    }
+
+    ~MallocInfo() {
+        if (file)
+            fclose(file);
     }
 };
 
