@@ -16,6 +16,7 @@
 #define DEBUG_TYPE "instrumenter"
 
 #include "llvm-c/Initialization.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -70,6 +71,7 @@ struct Instrumenter : public FunctionPass {
     bool runOnFunction(Function &F);
     virtual bool doInitialization(Module &M);
     virtual bool doFinalization(Module &M);
+    virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
     static char ID; // Pass identification, replacement for typeid
 
   private:
@@ -179,6 +181,11 @@ bool Instrumenter::doInitialization(Module &M) {
     // noopAsm = InlineAsm::get(FunctionType::get(IRB.getVoidTy(), false),
     //                          StringRef(""), StringRef(""), true);
     return true;
+}
+
+
+void Instrumenter::getAnalysisUsage(AnalysisUsage& AU) const {
+    AU.addRequired<LoopInfoWrapperPass>();
 }
 
 // and set isWrite. Otherwise return nullptr.
@@ -307,27 +314,44 @@ bool Instrumenter::doFinalization(Module &M) {
 
 bool isLocalVariable(Value *value) { return value->getValueID() == 48; }
 
+void printLoop(Loop *L) {
+    errs() << "Loop: \n";
+    L->dump();
+    auto *phinode = L->getCanonicalInductionVariable();
+    if (phinode) {
+        errs() << "CIV of this loop: ";
+        phinode->print(errs());
+        errs() << "\n";
+    }
+    for (BasicBlock *BB : L->getBlocks()) {
+        errs() << "basicb name: "<< BB->getName() <<"\n";
+    }
+    for (Loop *SL : L->getSubLoops()) {
+        printLoop(SL);
+    }
+}
+
 bool Instrumenter::runOnFunction(Function &F) {
     // If the input function is the function added by myself, don't do anything.
     if (&F == ctorFunction)
         return false;
 
+    // Get loop info for this function.
+    if (!F.isDeclaration()) {
+        // generate the LoopInfoBase for the current function
+        LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+        for (Loop *L : LI) 
+            printLoop(L);
+    }
+
     int thisFuncId = funcCounter++;
     funcNames.insert(std::make_pair(thisFuncId, F.getName()));
 
-    // We want to instrument every address only once per basic block (unless
-    // there are calls between uses).
-    SmallSet<Value *, 16> tempToInstrument;
-    SmallVector<Instruction *, 16> ToInstrument;
-    SmallVector<Instruction *, 8> NoReturnCalls;
-    bool isWrite;
-
     // Fill the set of memory operations to instrument.
     unsigned long instCounter = 0;
-    // If the function is modified, runOnFunction should return True.
     int NumInstrumented = 0;
+    bool isWrite;
     for (Function::iterator bb = F.begin(), FE = F.end(); bb != FE; ++bb) {
-        tempToInstrument.clear();
         for (BasicBlock::iterator ins = bb->begin(), BE = bb->end(); ins != BE;
              ++ins, ++instCounter) {
             Instruction *Inst = &*ins;
@@ -340,5 +364,6 @@ bool Instrumenter::runOnFunction(Function &F) {
             }
         }
     }
+    // If the function is modified, runOnFunction should return True.
     return NumInstrumented > 0;
 }
