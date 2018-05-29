@@ -312,7 +312,9 @@ bool Instrumenter::doFinalization(Module &M) {
     return false;
 }
 
-bool isLocalVariable(Value *value) { return value->getValueID() == 48; }
+bool isLocalVariable(Value *value) {
+    return dyn_cast<AllocaInst>(value);
+}
 
 void printLoop(Loop *L) {
     errs() << "Loop: \n";
@@ -359,7 +361,7 @@ bool Instrumenter::runOnFunction(Function &F) {
                 if (isLocalVariable(addr)) {
                     continue;
                 }
-                instrumentMemoryAccess(Inst, thisFuncId, instCounter + 1);
+                instrumentMemoryAccess(Inst, thisFuncId, instCounter);
                 NumInstrumented++;
             }
         }
