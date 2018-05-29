@@ -1,7 +1,7 @@
 #include "LoggingThread.h"
 
 void Thread::flush_log() {
-    if (!this->buffer_f) {
+    if (!this->buffer_f && this->output_n != 0) {
         auto filename = get_filename();
         this->buffer_f = fopen(filename.c_str(), "a");
         if (!this->buffer_f) {

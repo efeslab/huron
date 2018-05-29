@@ -30,7 +30,7 @@ public:
   unsigned int size;
   AllMallocInformation()
   {
-    FILE *fp = fopen("__record___malloc.log", "r");
+    FILE *fp = fopen("record_malloc.log", "r");
     if (fp == NULL)
     {
       printf("Error no first pass malloc profile file found!\n");
