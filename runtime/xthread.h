@@ -185,14 +185,12 @@ public:
             std::string cat_cmd = "cat " + _threads[i].get_filename() + " >> " + output_name;
             if (system(cat_cmd.c_str()))
                 throw std::system_error();
-            std::string wc_cmd = "wc -l " + _threads[i].get_filename();
-            system(wc_cmd.c_str());
-            std::string wc_out_cmd = "wc -l " + output_name;
-            system(wc_out_cmd.c_str());
             std::string rm_cmd = "rm " + _threads[i].get_filename();
             if (system(rm_cmd.c_str()))
                 throw std::system_error();
         }
+        std::string wc_out_cmd = "wc -l " + output_name;
+        system(wc_out_cmd.c_str());
     }
 
 private:
