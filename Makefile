@@ -21,11 +21,11 @@ tensor_bc: tensor_parallel.cpp
 	clang++ -c -emit-llvm -std=c++11 -I ../eigen/ -DEIGEN_USE_THREADS tensor_parallel.cpp -o tensor.bc
 ifdef INST
 	opt -load ./LLVMInstrumenter.so -instrumenter < tensor.bc > tensor_inst.bc 2> build_tensor.log
-	mv tensor_inst.bc tensor.bc
+	# mv tensor_inst.bc tensor.bc
 endif
 
 tensor: tensor_bc
-	llc -filetype=obj tensor.bc -o tensor.o
+	llc -filetype=obj tensor_inst.bc -o tensor.o
 ifdef INST
 	g++ tensor.o -Wl,./libruntime.so -lpthread -o tensor
 else

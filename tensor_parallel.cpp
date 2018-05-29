@@ -35,8 +35,8 @@ int main(void) {
     Eigen::Tensor<float, 2> c(SIZE, SIZE);
 
     Eigen::array<Eigen::IndexPair<int>, 1> dimension = {Eigen::IndexPair<int>(1, 0)};
-    Eigen::ThreadPool tpi(32);
-    Eigen::ThreadPoolDevice my_device(&tpi, 32);
+    Eigen::ThreadPool tpi(8);
+    Eigen::ThreadPoolDevice my_device(&tpi, 8);
     // for(int i = 0; i < SIZE; i++)
     // {
     //   for(int j = 0; j < SIZE; j++)
