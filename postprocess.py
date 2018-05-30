@@ -311,7 +311,7 @@ def print_malloc_final(path, graphs):
                     if offset not in mallocs[mallocId]:
                         mallocs[mallocId][offset] = True
     with open(output_file, "w") as file:
-        for malloc in mallocs:
+        for malloc in sorted(mallocs.keys()):
             print(malloc, file=file)
             print(len(mallocs[malloc]), file=file)
             for i in sorted(mallocs[malloc].keys()):

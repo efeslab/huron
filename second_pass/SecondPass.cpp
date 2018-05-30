@@ -49,18 +49,19 @@ public:
       }
       allMallocs.push_back(currentMalloc);
     }
-    currentIndex = 0;
-    size = allMallocs.size();
+    this->currentIndex = 0;
+    this->size = allMallocs.size();
     //printf("%d\n",size);
     fclose(fp);
   }
   void push_new_malloc(unsigned int id, void * start, size_t size)
   {
     //printf("%d %p %d\n", id, start, size);
-    if(currentIndex >= size)return;
-    else if(id<allMallocs[currentIndex]->id)return;
+    if(currentIndex >= this->size)return;//printf("%d->1\n",id);//return;
+    else if(id<allMallocs[currentIndex]->id)return;//printf("%d->2\n",id);//return;
     else if (id > allMallocs[currentIndex]->id)printf("Error while pushing new malloc");
     else {
+      //printf("%d %p %d\n", id, start, size);
       allMallocs[currentIndex]->start = start;
       allMallocs[currentIndex]->size  = size;
       findMap[start] = allMallocs[currentIndex];
@@ -73,11 +74,13 @@ public:
     if(it==findMap.begin())return false;
     it--;
     MallocInformation * currentMalloc = it->second;
+    if(currentMalloc == NULL) return false;
     if((currentMalloc->start <= address) && (address < (currentMalloc->start)+(currentMalloc->size)))
     {
       //do some other checking
       unsigned int currentOffset = (long)address - (long)(currentMalloc->start);
       auto foundIt = currentMalloc->offsets.find(currentOffset);
+      //printf("Inserted\n");
       if(foundIt==currentMalloc->offsets.end())return false;
       else return true;
     }
@@ -144,7 +147,7 @@ void *my_malloc_hook(size_t size, const void *caller) {
     // Record that range of address.
     if (getThreadIndex() == 0)
     {
-        allMallocInformation->push_new_malloc(mallocId, alloced, size);
+        allMallocInformation->push_new_malloc(mallocId++, alloced, size);
     }
     return alloced;
 }
@@ -182,7 +185,8 @@ uintptr_t redirect_ptr(uintptr_t addr, bool is_write) {
         return addr;
     if (is_heap) {
         try {
-            allMallocInformation->isFalseSharingAddress((void *)addr);
+            allMallocInformation->isFalseSharingAddress((void *)addr);//printf("yes\n");
+            //else printf("no\n");
         }
         catch (std::invalid_argument&) {
             return addr;
