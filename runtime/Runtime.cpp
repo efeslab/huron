@@ -56,11 +56,9 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 }
 
 typedef std::unordered_map<uintptr_t, CacheLine *> CacheLineBitmap;
-CacheLineBitmap allCacheLineInfo;
-std::mutex allCacheLineInfoLock;
+CacheLineBitmap* allCacheLineInfo;
 
 MallocInfo malloc_sizes;
-std::mutex other_globals_lock;
 
 class MallocHookDeactivator {
 public:
@@ -75,7 +73,7 @@ void initializer(void) {
 #endif
     xthread::getInstance().initialize();
     getGlobalRegion(&globalStart, &globalEnd);
-    printf("globalStart = %p, globalEnd = %p\n", globalStart, globalEnd);
+    allCacheLineInfo = new CacheLineBitmap;
     current->malloc_hook_active = true;
 }
 
@@ -86,8 +84,9 @@ void finalizer(void) {
     printf("Finalizing...\n");
     malloc_sizes.dump();
 #endif
-    for (const auto &p: allCacheLineInfo)
+    for (const auto &p: *allCacheLineInfo)
         delete p.second;
+    delete allCacheLineInfo;
     xthread::getInstance().flush_all_concat_to("record.log");
 }
 
@@ -99,18 +98,25 @@ void *my_malloc_hook(size_t size, const void *caller) {
     // Only record thread 0.
     if (getThreadIndex() != 0)
         return start_ptr;
-    other_globals_lock.lock();
     heapStart = std::min(heapStart, start);
     heapEnd = std::max(heapEnd, end);
     malloc_sizes.insert(start, size);
-    other_globals_lock.unlock();
     cacheline_id_t cl_start = get_cache_line_id(start), cl_end = get_cache_line_id(end);
     if (!is_cacheline_aligned(end))
         cl_end++;
-    allCacheLineInfoLock.lock();
+    // There's only one writer (thread 0), so we're doing this to avoid locks.
+    CacheLineBitmap *copy = nullptr;
     for (auto i = cl_start; i < cl_end; i++)
-        allCacheLineInfo.emplace(i, new CacheLine);
-    allCacheLineInfoLock.unlock();
+        if (allCacheLineInfo->find(i) == allCacheLineInfo->end()) {
+            if (!copy)
+                copy = new CacheLineBitmap(*allCacheLineInfo);
+            copy->emplace(i, new CacheLine);
+        }
+    if (copy) {
+        auto *old = allCacheLineInfo;
+        allCacheLineInfo = copy;  // commit the change.
+        delete old;
+    }
 #ifdef DEBUG
     // printf("malloc(%lu) called from %p returns %p\n", size, caller, start);
     // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
@@ -152,33 +158,15 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     uintptr_t cacheLineId = get_cache_line_id(addr);
     // Get reader lock, then perform find.
     // Not found -> not malloc'ed by thread 0 -> return.
-    allCacheLineInfoLock.lock();
-    auto found = allCacheLineInfo.find(cacheLineId);
-    if (found == allCacheLineInfo.end()) {
-        allCacheLineInfoLock.unlock();
+    auto found = allCacheLineInfo->find(cacheLineId);
+    if (found == allCacheLineInfo->end())
         return;
-    }
     CacheLine *cl = found->second;
-    allCacheLineInfoLock.unlock();
-    bool isInstrumented = is_write ? found->second->store(getThreadIndex()) : found->second->load(getThreadIndex());
+    bool isInstrumented = is_write ? cl->store(getThreadIndex()) : cl->load(getThreadIndex());
     if (isInstrumented) {
         RWRecord rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
         current->log_load_store(rec);
     }
-//        RWRecord rec;
-//        if (is_heap) {
-//            try {
-//                MallocIdSize id_offset = malloc_sizes.find_id_offset(addr);
-//                rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write,
-//                               (uint32_t) id_offset.id, id_offset.size);
-//            }
-//            catch (std::invalid_argument&) {
-//                return;
-//            }
-//        } else
-//            return;
-            //rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
-
 }
 
 // Intercept the pthread_create function.
