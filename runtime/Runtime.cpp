@@ -61,10 +61,15 @@ CacheLineBitmap* allCacheLineInfo;
 MallocInfo malloc_sizes;
 
 class MallocHookDeactivator {
+    Thread *current_copy;
 public:
-    MallocHookDeactivator() noexcept { current->malloc_hook_active = false; }
+    MallocHookDeactivator() noexcept: current_copy(current) { current_copy->malloc_hook_active = false; }
 
-    ~MallocHookDeactivator() noexcept { current->malloc_hook_active = true; }
+    ~MallocHookDeactivator() noexcept { current_copy->malloc_hook_active = true; }
+
+    Thread *get_current() {
+        return current_copy;
+    }
 };
 
 void initializer(void) {
@@ -96,7 +101,7 @@ void *my_malloc_hook(size_t size, const void *caller) {
     void *start_ptr = malloc(size);
     uintptr_t start = (uintptr_t)start_ptr, end = start + size;
     // Only record thread 0.
-    if (getThreadIndex() != 0)
+    if (deactiv.get_current()->index != 0)
         return start_ptr;
     heapStart = std::min(heapStart, start);
     heapEnd = std::max(heapEnd, end);
@@ -162,10 +167,10 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     if (found == allCacheLineInfo->end())
         return;
     CacheLine *cl = found->second;
-    bool isInstrumented = is_write ? cl->store(getThreadIndex()) : cl->load(getThreadIndex());
+    bool isInstrumented = is_write ? cl->store(deactiv.get_current()->index) : cl->load(deactiv.get_current()->index);
     if (isInstrumented) {
         RWRecord rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
-        current->log_load_store(rec);
+        deactiv.get_current()->log_load_store(rec);
     }
 }
 
