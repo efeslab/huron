@@ -12,6 +12,7 @@ CACHELINE_SIZE = 64
 def print_addr(addr):
     return '0x{:02x}'.format(addr)
 
+
 def get_malloc_ids():
     f = open("mallocIds.csv", 'r')
     reader = csv.reader(f)
@@ -29,13 +30,16 @@ def get_malloc_ids():
     f.close()
     return mallocIds, rangeStarts, rangeEnds
 
+
 mallocIds, rangeStarts, rangeEnds = get_malloc_ids()
+
 
 def get_malloc_id(addr):
     for i in range(len(mallocIds)):
         if rangeStarts[i] <= addr and addr < rangeEnds[i]:
             return mallocIds[i], rangeStarts[i], rangeEnds[i]
     return -1, -1, -1
+
 
 class Record:
     @staticmethod
@@ -45,8 +49,7 @@ class Record:
     def __init__(self, line):
         self.thread = int(line[0])
         self.addr = int(line[1], 16)
-        [self.func, self.inst, self.size] = [int(xstr) for xstr in line[2:5]]
-        self.is_write = bool(line[5])
+        [self.func, self.inst, self.size, self.r, self.w] = [int(xstr) for xstr in line[2:7]]
         self.cacheline = Record._calc_cacheline_id(self.addr)
 
     def __str__(self):
@@ -54,7 +57,7 @@ class Record:
         thread_str = str(self.thread)
         addr_str = print_addr(self.addr)
         rest = [str(x) for x in [self.func, self.inst, self.size]]
-        return ','.join([cacheline_str, thread_str, addr_str, get_malloc_id(self.addr)] + rest)
+        return ','.join([cacheline_str, thread_str, addr_str] + rest)
 
     def get_addr_range(self):
         return self.addr, self.addr + self.size
@@ -64,46 +67,44 @@ class AddrRecord:
     def __init__(self, clid, records, start, end):
         self.thread_rw, self.pc_rw = defaultdict(lambda: [0, 0]), defaultdict(lambda: [0, 0])
         self.start, self.end = start, end
+        self.m_id, self.m_start, self.m_end = get_malloc_id(self.start)
         self.clid = clid
         for rec in records:
-            if rec.is_write:
-                self.thread_rw[rec.thread][1] += 1
-                self.pc_rw[(rec.func, rec.inst)][1] += 1
-            else:
-                self.thread_rw[rec.thread][0] += 1
-                self.pc_rw[(rec.func, rec.inst)][0] += 1
+            self.thread_rw[rec.thread][0] += rec.r
+            self.thread_rw[rec.thread][1] += rec.w
+            self.pc_rw[(rec.func, rec.inst)][0] += rec.r
+            self.pc_rw[(rec.func, rec.inst)][1] += rec.w
 
     def __str__(self):
-        malloc_id, malloc_start, malloc_end = get_malloc_id(self.start)
         start_offset = self.start
         end_offset = self.end
         isInSameMalloc = 1
-        if malloc_id == -1:
+        if self.m_id == -1:
             # do nothing
             pass
         else:
-            start_offset -= malloc_start
-            if malloc_end < end_offset:
+            start_offset -= self.m_start
+            if self.m_end < end_offset:
                 isInSameMalloc = -1
-            end_offset -= malloc_start
+            end_offset -= self.m_start
         return '(%d, %d)(%d)(%d)(%d)(%d)@%d: %s %s' % (
             start_offset,
             end_offset,
             self.end - self.start,
-            malloc_id,
+            self.m_id,
             isInSameMalloc,
             self.start // CACHELINE_SIZE == self.end // CACHELINE_SIZE,
             self.clid,
             dict(self.thread_rw), dict(self.pc_rw)
         )
+
     def getKeys(self):
-       return set(self.pc_rw.keys())
+        return set(self.pc_rw.keys())
 
     def getMallocInformation(self):
-       malloc_id, malloc_start, malloc_end = get_malloc_id(self.start)
-       if malloc_id == -1:
-           return -1,-1
-       return (malloc_id,self.start-malloc_start)
+        if self.m_id == -1:
+            return -1, -1
+        return self.m_id, self.start - self.m_start
 
     @staticmethod
     def from_cacheline_records(clid, records):
@@ -221,28 +222,30 @@ class Graph:
         with io.StringIO() as output:
             for v0 in self.v:
                 print(v0, file=output, end='')
-            #for e0 in self.e:
+            # for e0 in self.e:
             #    print(e0, file=output, sep=' ')
             # print('\n', file=output)
             return output.getvalue()
+
     def getPCInformation(self):
         dict = {}
         for v0 in self.v:
             keys = v0.getKeys()
             for key in keys:
                 if key not in dict:
-                    dict[key]=True
+                    dict[key] = True
         return set(dict.keys())
+
     def getMallocInformation(self):
         mallocs = {}
         for v0 in self.v:
-           mallocId, offset = v0.getMallocInformation()
-           if mallocId == -1:
-               continue
-           if mallocId not in mallocs:
-               mallocs[mallocId] = {offset: True}
-           else:
-               mallocs[mallocId][offset] = True
+            mallocId, offset = v0.getMallocInformation()
+            if mallocId == -1:
+                continue
+            if mallocId not in mallocs:
+                mallocs[mallocId] = {offset: True}
+            else:
+                mallocs[mallocId][offset] = True
         return mallocs
 
     def is_complete_graph(self):
@@ -286,11 +289,12 @@ def print_final(path, graphs):
         keys = g.getPCInformation()
         for key in keys:
             if key not in dict:
-                dict[key]=True
+                dict[key] = True
     pcs = sorted(list(dict.keys()))
     with open(output_file, 'w') as f:
         for pc in pcs:
-            print(str(pc[0])+' '+str(pc[1]), file=f)
+            print(str(pc[0]) + ' ' + str(pc[1]), file=f)
+
 
 def print_malloc_final(path, graphs):
     suffix = '_malloc'
@@ -311,8 +315,9 @@ def print_malloc_final(path, graphs):
             print(malloc, file=file)
             print(len(mallocs[malloc]), file=file)
             for i in sorted(mallocs[malloc].keys()):
-                print(i,file=file,end=' ')
-            print('',file=file)
+                print(i, file=file, end=' ')
+            print('', file=file)
+
 
 def sanity_check(groups, addrrec_groups):
     assert len(groups) == len(addrrec_groups)

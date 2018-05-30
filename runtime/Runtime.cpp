@@ -169,8 +169,8 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     CacheLine *cl = found->second;
     bool isInstrumented = is_write ? cl->store(deactiv.get_current()->index) : cl->load(deactiv.get_current()->index);
     if (isInstrumented) {
-        RWRecord rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
-        deactiv.get_current()->log_load_store(rec);
+        LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+        deactiv.get_current()->log_load_store(rec, is_write);
     }
 }
 

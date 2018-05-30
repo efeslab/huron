@@ -1,7 +1,7 @@
 #include "LoggingThread.h"
 
 void Thread::flush_log() {
-    if (!this->buffer_f && this->output_n != 0) {
+    if (!this->buffer_f) {
         auto filename = get_filename();
         this->buffer_f = fopen(filename.c_str(), "a");
         if (!this->buffer_f) {
@@ -10,16 +10,26 @@ void Thread::flush_log() {
             return;
         }
     }
-    for (int i = 0; i < this->output_n; i++) {
-        this->outputBuf[i].dump(this->buffer_f, this->index);
-    }
-    this->output_n = 0;
+    for (const auto &rw_n: this->outputBuf)
+        // if (rw_n.second.second)  // if is not read-only
+        rw_n.first.dump(this->buffer_f, this->index, rw_n.second.first, rw_n.second.second);
+    this->outputBuf.clear();
 }
 
-void Thread::log_load_store(const RWRecord &rw) {
-    if (this->output_n == LOG_SIZE)
+void Thread::log_load_store(const LocRecord &rw, bool is_write) {
+    if (this->outputBuf.size() == LOG_SIZE)
         this->flush_log();
-    this->outputBuf[this->output_n++] = rw;
+    auto it = this->outputBuf.find(rw);
+    if (it != this->outputBuf.end()) {
+        if (is_write)
+            it->second.second++;
+        else
+            it->second.first++;
+    }
+    else {
+        auto pair = is_write ? std::make_pair(0, 1) : std::make_pair(1, 0);
+        this->outputBuf.emplace(rw, pair);
+    }
 }
 
 std::string Thread::get_filename() {
