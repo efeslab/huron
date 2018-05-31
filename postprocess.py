@@ -78,22 +78,18 @@ class AddrRecord:
     def __str__(self):
         start_offset = self.start
         end_offset = self.end
-        isInSameMalloc = 1
         if self.m_id == -1:
             # do nothing
             pass
         else:
             start_offset -= self.m_start
-            if self.m_end < end_offset:
-                isInSameMalloc = -1
             end_offset -= self.m_start
-        return '(%d, %d)(%d)(%d)(%d)(%d)@%d: %s %s' % (
+        return '(%d, %d)(%d)(%d)@%d: %s %s' % (
             start_offset,
             end_offset,
             self.end - self.start,
             self.m_id,
-            isInSameMalloc,
-            self.start // CACHELINE_SIZE == self.end // CACHELINE_SIZE,
+            # self.start // CACHELINE_SIZE == self.end // CACHELINE_SIZE,
             self.clid,
             dict(self.thread_rw), dict(self.pc_rw)
         )
@@ -221,10 +217,10 @@ class Graph:
         import io
         with io.StringIO() as output:
             for v0 in self.v:
-                print(v0, file=output, end='')
-            # for e0 in self.e:
-            #    print(e0, file=output, sep=' ')
-            # print('\n', file=output)
+                print(v0, file=output, end='\n')
+            for e0 in self.e:
+               print(e0, file=output)
+            print('\n', file=output)
             return output.getvalue()
 
     def getPCInformation(self):
@@ -256,8 +252,8 @@ def is_4equalnodes(g):
     return len(g.v) == 4 and all(v.end - v.start == 16 for v in g.v)
 
 
-def is_all_nodes_rw_1(g):
-    return all(v.get_total_rw() == 1 for v in g.v)
+def is_all_nodes_rw_2(g):
+    return all(v.get_total_rw() == 2 for v in g.v)
 
 
 def print_first_pass(path, groups):
@@ -284,16 +280,19 @@ def print_final(path, graphs):
     suffix = '_output'
     root, ext = os.path.splitext(path)
     output_file = root + suffix + ext
-    dict = {}
-    for g in graphs:
-        keys = g.getPCInformation()
-        for key in keys:
-            if key not in dict:
-                dict[key] = True
-    pcs = sorted(list(dict.keys()))
     with open(output_file, 'w') as f:
-        for pc in pcs:
-            print(str(pc[0]) + ' ' + str(pc[1]), file=f)
+        for g in graphs:
+            print(g, file=f)
+    # dict = {}
+    # for g in graphs:
+    #     keys = g.getPCInformation()
+    #     for key in keys:
+    #         if key not in dict:
+    #             dict[key] = True
+    # pcs = sorted(list(dict.keys()))
+    # with open(output_file, 'w') as f:
+    #     for pc in pcs:
+    #         print(str(pc[0]) + ' ' + str(pc[1]), file=f)
 
 
 def print_malloc_final(path, graphs):
@@ -310,12 +309,14 @@ def print_malloc_final(path, graphs):
                 for offset in malloc[mallocId]:
                     if offset not in mallocs[mallocId]:
                         mallocs[mallocId][offset] = True
+    malloc_prims = dict(zip(mallocIds, zip(rangeStarts, rangeEnds)))
     with open(output_file, "w") as file:
         for malloc in sorted(mallocs.keys()):
-            print(malloc, file=file)
-            print(len(mallocs[malloc]), file=file)
-            for i in sorted(mallocs[malloc].keys()):
-                print(i, file=file, end=' ')
+            start, end = malloc_prims[malloc]
+            size = end - start
+            print("%d, %d (%d)" % (malloc, len(mallocs[malloc]), size), file=file)
+            # for i in sorted(mallocs[malloc].keys()):
+            #     print(i, file=file, end=' ')
             print('', file=file)
 
 
@@ -359,23 +360,29 @@ def main():
     # sanity_check(groups, addrrec_groups)
 
     graphs = [Graph(clid, group) for clid, group in addrrec_groups]
+    # print(sum(v.get_total_rw() for g in graphs for v in g.v))
     noedge_n, graphs = filter_count(graphs, lambda g: not g.is_complete_graph())
+    # print(sum(v.get_total_rw() for g in graphs for v in g.v))
     minimal_n, graphs = filter_count(
         graphs,
-        lambda g: not is_4equalnodes(g) or not is_all_nodes_rw_1(g)
+        lambda g: not is_4equalnodes(g) or not is_all_nodes_rw_2(g)
     )
+    # print(sum(v.get_total_rw() for g in graphs for v in g.v))
+    graph_n_threads = [len(set(th for v in g.v for th in v.thread_rw.keys())) for g in graphs]
+    print("Average thread per cacheline: %f\n" % (sum(graph_n_threads) / len(graph_n_threads)))
     # print_first_pass(path, groups)
     # print_second_pass(path, addrrec_groups)
     print_final(path, graphs)
     print_malloc_final(path, graphs)
 
-    stats = n, single_n, noedge_n, minimal_n, n - single_n - noedge_n - minimal_n
+    stats = n, single_n, noedge_n, minimal_n, n - single_n - noedge_n - minimal_n, len(mallocIds)
     print("""
 %d cachelines in total. 
 %d cachelines are single threaded (removed).
 %d cacheline graphs have no edges (removed).
-%d graphs are 4 symmetric nodes with r, w = 0, 1
-Remain: %d
+%d graphs are 4 symmetric nodes with r, w = 1, 1
+Remain: %d.
+%d mallocs occurred.
 """ % stats)
 
     csv_line = ','.join(str(x) for x in stats)
