@@ -26,7 +26,7 @@ int main(void) {
     // cin>>SIZE;
     char const *size_str = getenv("MSIZE");
     int SIZE = size_str ? std::stoi(size_str) : 1000;
-    cout << SIZE << '\n';
+    //cout << SIZE << '\n';
 
     Eigen::Tensor<float, 2> a(SIZE, SIZE);
 
