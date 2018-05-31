@@ -1,0 +1,112 @@
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+             9,123      cache-misses                                                  ( +-  4.76% )
+               470      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  3.29% )
+
+       0.013283501 seconds time elapsed                                          ( +-  1.60% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            18,887      cache-misses                                                  ( +-  4.24% )
+             1,417      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  3.40% )
+
+       0.018116293 seconds time elapsed                                          ( +-  1.39% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            28,246      cache-misses                                                  ( +-  5.62% )
+             1,476      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  2.99% )
+
+       0.036387173 seconds time elapsed                                          ( +-  1.35% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            26,120      cache-misses                                                  ( +-  8.56% )
+             2,168      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  3.44% )
+
+       0.076190624 seconds time elapsed                                          ( +-  1.06% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            32,663      cache-misses                                                  ( +-  9.54% )
+             2,281      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  2.76% )
+
+       0.122914428 seconds time elapsed                                          ( +-  0.71% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            40,869      cache-misses                                                  ( +- 10.53% )
+             2,354      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  2.57% )
+
+       0.189711277 seconds time elapsed                                          ( +-  0.49% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            40,536      cache-misses                                                  ( +- 11.59% )
+             3,101      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  1.97% )
+
+       0.281280906 seconds time elapsed                                          ( +-  0.44% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+            69,763      cache-misses                                                  ( +-  8.49% )
+             3,405      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  2.07% )
+
+       0.392636468 seconds time elapsed                                          ( +-  0.43% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+           111,832      cache-misses                                                  ( +-  4.45% )
+             3,572      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  2.08% )
+
+       0.549889875 seconds time elapsed                                          ( +-  0.33% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+           186,527      cache-misses                                                  ( +-  3.34% )
+             4,086      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  2.61% )
+
+       0.705341755 seconds time elapsed                                          ( +-  0.46% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+           260,910      cache-misses                                                  ( +-  2.04% )
+             4,096      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  1.95% )
+
+       0.909143669 seconds time elapsed                                          ( +-  0.34% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+           399,652      cache-misses                                                  ( +-  1.89% )
+             6,215      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  1.85% )
+
+       1.139088925 seconds time elapsed                                          ( +-  0.30% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+           544,356      cache-misses                                                  ( +-  1.20% )
+             7,373      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  1.78% )
+
+       1.418599600 seconds time elapsed                                          ( +-  0.23% )
+
+
+ Performance counter stats for './tensor_benchmark' (100 runs):
+
+           701,441      cache-misses                                                  ( +-  0.89% )
+             8,260      mem_load_uops_l3_hit_retired_xsnp_hitm                                     ( +-  1.74% )
+
+       1.734032786 seconds time elapsed                                          ( +-  0.20% )
+
