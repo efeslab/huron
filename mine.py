@@ -1,10 +1,11 @@
 import re
+import sys
 
-regex = r"\s+([\d,]+)\s+cache-misses.+\n\s+([\d,]+)\s+mem_load_uops_l3_hit_retired_xsnp_hitm.+"
+regex = r"\s+([\d,]+)\s+cache-misses.+\n\s+([\d,]+)\s+mem_load_uops_l3_hit_retired_xsnp_hitm.+\s+([\d\.]+)"
 
 test_str = ""
 
-with open("cachemisses.txt", "r") as file:
+with open(sys.argv[1], "r") as file:
   test_str = file.read()
 
 matches = re.finditer(regex, test_str, re.MULTILINE)
