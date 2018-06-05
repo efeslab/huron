@@ -4,9 +4,11 @@ INCLUDE_DIR = .
 SRCS =  $(SOURCE_DIR)/Runtime.cpp   \
 		$(SOURCE_DIR)/LoggingThread.cpp
 
-INCS =  $(INCLUDE_DIR)/MemArith.h 		 \
-		$(INCLUDE_DIR)/xthread.h       \
-    $(INCLUDE_DIR)/CacheLine.h
+INCS =  $(INCLUDE_DIR)/GetGlobal.h       \
+        $(INCLUDE_DIR)/LoggingThread.h   \
+        $(INCLUDE_DIR)/MallocInfo.h       \
+        $(INCLUDE_DIR)/MemArith.h 		 \
+		$(INCLUDE_DIR)/xthread.h         \
 
 DEPS = $(SRCS) $(INCS)
 

@@ -42,10 +42,6 @@ const int MAX_THREADS = 1 << 7;
 
 __thread Thread *current;
 
-inline int getThreadIndex() {
-    return current->index;
-}
-
 int __internal_pthread_create(pthread_t *t1, const pthread_attr_t *t2,
                               void *(*t3)(void *), void *t4) {
     typedef int (*p_create_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
@@ -79,16 +75,6 @@ public:
         isMultithreading = false;
 
         pthread_mutex_init(&_lock, nullptr);
-
-        // Shared the threads information. 
-        memset(&_threads, 0, sizeof(_threads));
-
-        // Initialize all mutex.
-        Thread *thisThread;
-
-        for (auto &_thread : _threads) {
-            thisThread = &_thread;
-        }
 
         // Allocate the threadindex for current thread.
         initInitialThread();

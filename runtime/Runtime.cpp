@@ -7,7 +7,6 @@
 #include "MemArith.h"
 #include "xthread.h"
 #include "GetGlobal.h"
-#include "CacheLine.h"
 
 extern "C" {
 
@@ -55,18 +54,19 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 }
 }
 
-typedef std::unordered_map<uintptr_t, CacheLine *> CacheLineBitmap;
-CacheLineBitmap allCacheLineInfo;
-std::mutex allCacheLineInfoLock;
-
 MallocInfo malloc_sizes;
 std::mutex other_globals_lock;
 
 class MallocHookDeactivator {
+    Thread *current_copy;
 public:
-    MallocHookDeactivator() noexcept { current->malloc_hook_active = false; }
+    MallocHookDeactivator() noexcept: current_copy(current) { current_copy->malloc_hook_active = false; }
 
-    ~MallocHookDeactivator() noexcept { current->malloc_hook_active = true; }
+    ~MallocHookDeactivator() noexcept { current_copy->malloc_hook_active = true; }
+
+    Thread *get_current() {
+        return current_copy;
+    }
 };
 
 void initializer(void) {
@@ -75,7 +75,6 @@ void initializer(void) {
 #endif
     xthread::getInstance().initialize();
     getGlobalRegion(&globalStart, &globalEnd);
-    printf("globalStart = %p, globalEnd = %p\n", globalStart, globalEnd);
     current->malloc_hook_active = true;
 }
 
@@ -84,16 +83,15 @@ void finalizer(void) {
     MallocHookDeactivator deactiv;
 #ifdef DEBUG
     printf("Finalizing...\n");
-    malloc_sizes.dump();
 #endif
-    for (const auto &p: allCacheLineInfo)
-        delete p.second;
+    malloc_sizes.dump();
     xthread::getInstance().flush_all_concat_to("record.log");
 }
 
 void *my_malloc_hook(size_t size, const void *caller) {
     // RAII deactivate malloc hook so that we can use malloc below.
     MallocHookDeactivator deactiv;
+<<<<<<< HEAD
     void *start_ptr = malloc(size);
     uintptr_t start = (uintptr_t)start_ptr, end = start + size;
     // Only record thread 0.
@@ -113,6 +111,21 @@ void *my_malloc_hook(size_t size, const void *caller) {
     allCacheLineInfoLock.unlock();
 #ifdef DEBUG
     // printf("malloc(%lu) called from %p returns %p\n", size, caller, start);
+=======
+    // void *start_ptr = malloc(size);
+    size = round_up_size(size, cacheline_size_power);
+    void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
+    uintptr_t start = (uintptr_t)start_ptr, end = start + size;
+    // Only record thread 0.
+    if (deactiv.get_current()->index != 0)
+        return start_ptr;
+    // The 3 lines below are single threaded.
+    heapStart = std::min(heapStart, start);
+    heapEnd = std::max(heapEnd, end);
+    malloc_sizes.insert(start, size);
+#ifdef DEBUG
+    // printf("malloc(%lu) returns %p\n", size, start_ptr);
+>>>>>>> magic
     // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
 #endif
     return start_ptr;
@@ -149,36 +162,8 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     bool is_heap = (addr >= heapStart && addr < heapEnd);
     if (!is_heap)
         return;
-    uintptr_t cacheLineId = get_cache_line_id(addr);
-    // Get reader lock, then perform find.
-    // Not found -> not malloc'ed by thread 0 -> return.
-    allCacheLineInfoLock.lock();
-    auto found = allCacheLineInfo.find(cacheLineId);
-    if (found == allCacheLineInfo.end()) {
-        allCacheLineInfoLock.unlock();
-        return;
-    }
-    CacheLine *cl = found->second;
-    allCacheLineInfoLock.unlock();
-    bool isInstrumented = is_write ? cl->store(getThreadIndex()) : cl->load(getThreadIndex());
-    if (isInstrumented) {
-        RWRecord rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
-        current->log_load_store(rec);
-    }
-//        RWRecord rec;
-//        if (is_heap) {
-//            try {
-//                MallocIdSize id_offset = malloc_sizes.find_id_offset(addr);
-//                rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write,
-//                               (uint32_t) id_offset.id, id_offset.size);
-//            }
-//            catch (std::invalid_argument&) {
-//                return;
-//            }
-//        } else
-//            return;
-            //rec = RWRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, is_write);
-
+    LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+    deactiv.get_current()->log_load_store(rec, is_write);
 }
 
 // Intercept the pthread_create function.
