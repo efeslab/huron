@@ -143,8 +143,8 @@ class AddrRecord:
 
     def get_thread_ids(self):
         if self.is_read_only():
-            return tuple()
-        return tuple(self.thread_rw.keys())
+            return set()
+        return set(self.thread_rw.keys())
 
     def get_total_rw(self):
         return sum(x for rw in self.thread_rw.values() for x in rw)
@@ -215,9 +215,11 @@ class Graph:
 
     def get_thread_groups(self):
         groups = []
-        for k, g in groupby(self.v, key=lambda x: x.get_thread_ids()):
-            groups.append((list(k), list(g)))
-        return sorted(groups, key=lambda kg: kg[0])
+        sorted_v = sorted(self.v, key=lambda x: x.get_thread_ids())
+        for k, g in groupby(sorted_v, key=lambda x: x.get_thread_ids()):
+            groups.append((k, list(g)))
+        groups = sorted(groups, key=lambda kg: kg[0])
+        return groups
 
     def __str__(self):
         import io
