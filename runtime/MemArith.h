@@ -1,7 +1,6 @@
 #ifndef MEMARITH_H
 #define MEMARITH_H
 
-typedef unsigned long cacheline_id_t;
 typedef unsigned long uintptr_t;
 
 /* Cache line is 64 (2^6) bytes. */
@@ -10,22 +9,14 @@ const unsigned long cacheline_size_power = 6;
 /* Word size is 4 bytes. */
 const unsigned long word_size_power = 2, word_size = 4;
 
-cacheline_id_t get_cache_line_id(cacheline_id_t addr) {
-    return addr >> cacheline_size_power;
+bool is_aligned_by(uintptr_t addr, size_t alignment) {
+    return addr % alignment == 0;
 }
 
-bool is_word_aligned(uintptr_t addr) {
-    return addr % word_size == 0;
-}
-
-bool is_cacheline_aligned(uintptr_t addr) {
-    return addr % (1 << cacheline_size_power) == 0;
-}
-
-uintptr_t round_up_size(size_t size) {
-    return is_word_aligned(size)
+uintptr_t round_up_size(size_t size, size_t alignment_power) {
+    return is_aligned_by(size, 1ul << alignment_power)
            ? size
-           : ((size >> word_size_power) + 1) * word_size;
+           : ((size >> alignment_power) + 1) << alignment_power;
 }
 
 // WordInfo *get_word_info(uintptr_t start, size_t total_words, uintptr_t addr) {
