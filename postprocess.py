@@ -92,9 +92,6 @@ class AddrRecord:
             dict(self.thread_rw), dict(self.pc_rw)
         )
 
-    def getKeys(self):
-        return set(self.pc_rw.keys())
-
     def get_malloc_info(self):
         if self.m_id == -1:
             return -1, -1
@@ -145,7 +142,7 @@ class AddrRecord:
         return set(self.thread_rw.keys())
 
     def get_total_rw(self):
-        return sum(x for rw in self.thread_rw.values() for x in rw)
+        return sum(rw[0] for rw in self.thread_rw.values()), sum(rw[1] for rw in self.thread_rw.values())
 
     def is_read_only(self):
         for r, w in self.thread_rw.values():
@@ -181,7 +178,8 @@ class Graph:
             self.records = records
 
         def get_group_rw(self):
-            return sum(r.get_total_rw() for r in self.records)
+            rs, ws = zip(*(r.get_total_rw() for r in self.records))
+            return sum(rs), sum(ws)
 
         def __str__(self):
             import io
@@ -227,7 +225,13 @@ class Graph:
         max_rw = None
         for i in range(len(self.groups)):
             for j in range(i + 1, len(self.groups)):
-                rw = min(self.groups[i].get_group_rw(), self.groups[j].get_group_rw())
+                if i == j:
+                    continue
+                ir, iw = self.groups[i].get_group_rw()
+                jr, jw = self.groups[j].get_group_rw()
+                irwjw = min(ir + iw, jw)
+                jrwiw = min(jr + jw, iw)
+                rw = max(irwjw, jrwiw)
                 if max_rw is None:
                     max_rw = rw
                 else:
