@@ -91,27 +91,6 @@ void finalizer(void) {
 void *my_malloc_hook(size_t size, const void *caller) {
     // RAII deactivate malloc hook so that we can use malloc below.
     MallocHookDeactivator deactiv;
-<<<<<<< HEAD
-    void *start_ptr = malloc(size);
-    uintptr_t start = (uintptr_t)start_ptr, end = start + size;
-    // Only record thread 0.
-    if (getThreadIndex() != 0)
-        return start_ptr;
-    other_globals_lock.lock();
-    heapStart = std::min(heapStart, start);
-    heapEnd = std::max(heapEnd, end);
-    malloc_sizes.insert(start, size);
-    other_globals_lock.unlock();
-    cacheline_id_t cl_start = get_cache_line_id(start), cl_end = get_cache_line_id(end);
-    if (!is_cacheline_aligned(end))
-        cl_end++;
-    allCacheLineInfoLock.lock();
-    for (auto i = cl_start; i < cl_end; i++)
-        allCacheLineInfo.emplace(i, new CacheLine);
-    allCacheLineInfoLock.unlock();
-#ifdef DEBUG
-    // printf("malloc(%lu) called from %p returns %p\n", size, caller, start);
-=======
     // void *start_ptr = malloc(size);
     size = round_up_size(size, cacheline_size_power);
     void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
@@ -125,7 +104,6 @@ void *my_malloc_hook(size_t size, const void *caller) {
     malloc_sizes.insert(start, size);
 #ifdef DEBUG
     // printf("malloc(%lu) returns %p\n", size, start_ptr);
->>>>>>> magic
     // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
 #endif
     return start_ptr;

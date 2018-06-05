@@ -12,7 +12,7 @@ INCS =  $(INCLUDE_DIR)/GetGlobal.h       \
 
 DEPS = $(SRCS) $(INCS)
 
-CXX = g++ -std=c++11 -g -O2 -I$(INCLUDE_DIR)
+CXX = g++ -std=c++11 -g -O3 -I$(INCLUDE_DIR)
 
 CFLAGS   = -fno-omit-frame-pointer -DDEBUG
 CFLAGS32 = $(CFLAGS) -m32 -DX86_32BIT # -O3
