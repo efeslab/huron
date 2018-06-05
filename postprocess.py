@@ -9,10 +9,6 @@ from itertools import groupby
 CACHELINE_SIZE = 64
 
 
-def print_addr(addr):
-    return '0x{:02x}'.format(addr)
-
-
 def get_malloc_ids():
     f = open("mallocIds.csv", 'r')
     reader = csv.reader(f)
@@ -36,7 +32,7 @@ mallocIds, rangeStarts, rangeEnds = get_malloc_ids()
 
 def get_malloc_id(addr):
     for i in range(len(mallocIds)):
-        if rangeStarts[i] <= addr and addr < rangeEnds[i]:
+        if rangeStarts[i] <= addr < rangeEnds[i]:
             return mallocIds[i], rangeStarts[i], rangeEnds[i]
     return -1, -1, -1
 
@@ -53,6 +49,8 @@ class Record:
         self.cacheline = Record._calc_cacheline_id(self.addr)
 
     def __str__(self):
+        def print_addr(addr):
+            return '0x{:02x}'.format(addr)
         cacheline_str = str(self.cacheline)
         thread_str = str(self.thread)
         addr_str = print_addr(self.addr)
@@ -97,7 +95,7 @@ class AddrRecord:
     def getKeys(self):
         return set(self.pc_rw.keys())
 
-    def getMallocInformation(self):
+    def get_malloc_info(self):
         if self.m_id == -1:
             return -1, -1
         return self.m_id, self.start - self.m_start
@@ -155,22 +153,6 @@ class AddrRecord:
                 return False
         return True
 
-    def is_true_shared(self):
-        return len(self.thread_rw.keys()) > 1
-
-    @staticmethod
-    def read_only_2(rec1, rec2):
-        return rec1.is_read_only() and rec2.is_read_only()
-
-    @staticmethod
-    def same_thread_affinity(rec1, rec2):
-        return rec1.thread_rw.keys() == rec2.thread_rw.keys()
-
-    @staticmethod
-    def thread_equivalence(rec1, rec2):
-        return AddrRecord.read_only_2(rec1, rec2) or \
-               AddrRecord.same_thread_affinity(rec1, rec2)
-
 
 def get_groups_from_log(file):
     reader = csv.reader(file)
@@ -192,22 +174,23 @@ def filter_count(objs, in_pred):
     return out_counter, in_list
 
 
-def cl_multi_threaded(group):
-    threads = set([rec.thread for rec in group])
-    return len(threads) != 1
-
-
-class Edge:
-    def __init__(self, f, t, w):
-        self.f = f
-        self.t = t
-        self.w = w
-
-    def __str__(self):
-        return '%d<-->%d(%d)' % (self.f, self.t, self.w)
-
-
 class Graph:
+    class GraphGroup:
+        def __init__(self, threads, records):
+            self.threads = threads
+            self.records = records
+
+        def get_group_rw(self):
+            return sum(r.get_total_rw() for r in self.records)
+
+        def __str__(self):
+            import io
+            with io.StringIO() as output:
+                print(self.threads, file=output)
+                for g0 in self.records:
+                    print(g0, file=output)
+                return output.getvalue()
+
     def __init__(self, clid, group):
         self.clid = clid
         self.v = group
@@ -217,75 +200,44 @@ class Graph:
         groups = []
         sorted_v = sorted(self.v, key=lambda x: x.get_thread_ids())
         for k, g in groupby(sorted_v, key=lambda x: x.get_thread_ids()):
-            groups.append((k, list(g)))
-        groups = sorted(groups, key=lambda kg: kg[0])
+            groups.append(self.GraphGroup(k, list(g)))
+        groups = sorted(groups, key=lambda kg: kg.threads)
         return groups
 
     def __str__(self):
         import io
         with io.StringIO() as output:
-            for k, g in self.groups:
-               print(k, file=output)
-               for g0 in g:
-                   print(g0, file=output)
+            for grp in self.groups:
+                print(grp, file=output, end='')
             print('\n', file=output)
             return output.getvalue()
 
-    def getPCInformation(self):
-        dict = {}
+    def get_malloc_info(self):
+        mallocs = defaultdict(list)
         for v0 in self.v:
-            keys = v0.getKeys()
-            for key in keys:
-                if key not in dict:
-                    dict[key] = True
-        return set(dict.keys())
-
-    def getMallocInformation(self):
-        mallocs = {}
-        for v0 in self.v:
-            mallocId, offset = v0.getMallocInformation()
-            if mallocId == -1:
-                continue
-            if mallocId not in mallocs:
-                mallocs[mallocId] = {offset: True}
-            else:
-                mallocs[mallocId][offset] = True
+            mallocId, offset = v0.get_malloc_info()
+            if mallocId != -1:
+                mallocs[mallocId].append(offset)
         return mallocs
 
     def is_complete_graph(self):
         return len(self.groups) == 1
 
-
-def is_4equalnodes(g):
-    return len(g.v) == 4 and all(v.end - v.start == 16 for v in g.v)
-
-
-def is_all_nodes_rw_2(g):
-    return all(v.get_total_rw() == 2 for v in g.v)
-
-
-def all_smaller_than_10(g):
-    return all(v.get_total_rw() < 10 for v in g.v)
-
-
-def print_first_pass(path, groups):
-    suffix = '_pass1'
-    root, ext = os.path.splitext(path)
-    first_pass_file = root + suffix + ext
-    with open(first_pass_file, 'w') as f:
-        for _, rows in groups:
-            for rec in rows:
-                print(str(rec), file=f)
+    def max_min_rw(self):
+        max_rw = None
+        for i in range(len(self.groups)):
+            for j in range(i + 1, len(self.groups)):
+                rw = min(self.groups[i].get_group_rw(), self.groups[j].get_group_rw())
+                if max_rw is None:
+                    max_rw = rw
+                else:
+                    max_rw = max(max_rw, rw)
+        return max_rw
 
 
-def print_second_pass(path, addrrec_groups):
-    suffix = '_pass2'
-    root, ext = os.path.splitext(path)
-    second_pass_file = root + suffix + ext
-    with open(second_pass_file, 'w') as f:
-        for clid, group in addrrec_groups:
-            for addrrec in group:
-                print(addrrec, file=f)
+def disp_thread_per_cl(graphs):
+    graph_n_threads = [len(set(th for v in g.v for th in v.thread_rw.keys())) for g in graphs]
+    print("Average thread per cacheline: %f" % (sum(graph_n_threads) / len(graph_n_threads)))
 
 
 def print_final(path, graphs):
@@ -295,50 +247,24 @@ def print_final(path, graphs):
     with open(output_file, 'w') as f:
         for g in graphs:
             print(g, file=f)
-    # dict = {}
-    # for g in graphs:
-    #     keys = g.getPCInformation()
-    #     for key in keys:
-    #         if key not in dict:
-    #             dict[key] = True
-    # pcs = sorted(list(dict.keys()))
-    # with open(output_file, 'w') as f:
-    #     for pc in pcs:
-    #         print(str(pc[0]) + ' ' + str(pc[1]), file=f)
 
 
-def print_malloc_final(path, graphs):
+def print_malloc(path, graphs):
     suffix = '_malloc'
     root, ext = os.path.splitext(path)
     output_file = root + suffix + ext
-    mallocs = {}
+    all_mallocs = defaultdict(list)
     for g in graphs:
-        malloc = g.getMallocInformation()
-        for mallocId in malloc:
-            if mallocId not in mallocs:
-                mallocs[mallocId] = malloc[mallocId]
-            else:
-                for offset in malloc[mallocId]:
-                    if offset not in mallocs[mallocId]:
-                        mallocs[mallocId][offset] = True
-    malloc_prims = dict(zip(mallocIds, zip(rangeStarts, rangeEnds)))
+        g_mallocs = g.get_malloc_info()
+        for mallocId in g_mallocs:
+            all_mallocs[mallocId].extend(g_mallocs[mallocId])
     with open(output_file, "w") as file:
-        for malloc in sorted(mallocs.keys()):
+        for malloc in sorted(all_mallocs.keys()):
             print(malloc, file=file)
-            print(len(mallocs[malloc]), file=file)
-            for i in sorted(mallocs[malloc].keys()):
-                print(i,file=file,end=' ')
-            print('',file=file)
-
-def sanity_check(groups, addrrec_groups):
-    assert len(groups) == len(addrrec_groups)
-    for (_, group), (_, addr_group) in zip(groups, addrrec_groups):
-        addrrec_rw, group_rw = 0, 0
-        for rec in addr_group:
-            for r, w in rec.thread_rw.values():
-                addrrec_rw += r + w
-        group_rw = len(group)
-        assert addrrec_rw == group_rw
+            print(len(all_mallocs[malloc]), file=file)
+            for i in sorted(all_mallocs[malloc]):
+                print(i, file=file, end=' ')
+            print('', file=file)
 
 
 def append_csv_file(path, csv_line):
@@ -358,45 +284,31 @@ def main():
 
     with open(path, 'r') as f:
         groups = get_groups_from_log(f)
-
-    n = len(groups)
-    single_n, groups = filter_count(groups, lambda group: cl_multi_threaded(group[1]))
-
+        n = len(groups)
     addrrec_groups = [
         (clid, AddrRecord.from_cacheline_records(clid, group))
         for clid, group in groups
     ]
 
-    # sanity_check(groups, addrrec_groups)
-
     graphs = [Graph(clid, group) for clid, group in addrrec_groups]
-    # print(sum(v.get_total_rw() for g in graphs for v in g.v))
     noedge_n, graphs = filter_count(graphs, lambda g: not g.is_complete_graph())
-    # print(sum(v.get_total_rw() for g in graphs for v in g.v))
-    minimal_n, graphs = filter_count(
-        graphs,
-        lambda g: not all_smaller_than_10(g) # not is_4equalnodes(g) or not is_all_nodes_rw_2(g)
-    )
-    # print(sum(v.get_total_rw() for g in graphs for v in g.v))
-    graph_n_threads = [len(set(th for v in g.v for th in v.thread_rw.keys())) for g in graphs]
-    print("Average thread per cacheline: %f\n" % (sum(graph_n_threads) / len(graph_n_threads)))
-    # print_first_pass(path, groups)
-    # print_second_pass(path, addrrec_groups)
-    print_final(path, graphs)
-    print_malloc_final(path, graphs)
+    minimal_n, graphs = filter_count(graphs, lambda g: g.max_min_rw() >= 20)
 
-    stats = n, single_n, noedge_n, minimal_n, n - single_n - noedge_n - minimal_n, len(mallocIds)
+    disp_thread_per_cl(graphs)
+    print_final(path, graphs)
+    print_malloc(path, graphs)
+
+    stats = n, noedge_n, minimal_n, n - noedge_n - minimal_n, len(mallocIds)
     print("""
 %d cachelines in total. 
-%d cachelines are single threaded (removed).
-%d graphs have no edges (removed).
-in %d graphs all nodes have l+s < 10 (removed).
+%d cachelines (graphs) have no false sharing (removed).
+%d graphs have max_min_rw < 20 (removed).
 Remain: %d.
 %d mallocs occurred.
 """ % stats)
 
-    csv_line = ','.join(str(x) for x in stats)
-    append_csv_file(path, csv_line)
+    # csv_line = ','.join(str(x) for x in stats)
+    # append_csv_file(path, csv_line)
 
 
 main()
