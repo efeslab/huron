@@ -141,6 +141,11 @@ class AddrRecord:
         # The number of breakpoints will not exceed CACHELINE_SIZE, so this is actually O(n).
         return addr_records
 
+    def get_thread_ids(self):
+        if self.is_read_only():
+            return tuple()
+        return tuple(self.thread_rw.keys())
+
     def get_total_rw(self):
         return sum(x for rw in self.thread_rw.values() for x in rw)
 
@@ -206,20 +211,21 @@ class Graph:
     def __init__(self, clid, group):
         self.clid = clid
         self.v = group
-        edges = []
-        for i in range(len(group)):
-            for j in range(i + 1, len(group)):
-                if AddrRecord.thread_equivalence(group[i], group[j]):
-                    edges.append(Edge(i, j, 0))
-        self.e = edges
+        self.groups = self.get_thread_groups()
+
+    def get_thread_groups(self):
+        groups = []
+        for k, g in groupby(self.v, key=lambda x: x.get_thread_ids()):
+            groups.append((list(k), list(g)))
+        return sorted(groups, key=lambda kg: kg[0])
 
     def __str__(self):
         import io
         with io.StringIO() as output:
-            for v0 in self.v:
-                print(v0, file=output, end='\n')
-            for e0 in self.e:
-               print(e0, file=output)
+            for k, g in self.groups:
+               print(k, file=output)
+               for g0 in g:
+                   print(g0, file=output)
             print('\n', file=output)
             return output.getvalue()
 
@@ -245,7 +251,7 @@ class Graph:
         return mallocs
 
     def is_complete_graph(self):
-        return len(self.e) == len(self.v) * (len(self.v) - 1) / 2
+        return len(self.groups) == 1
 
 
 def is_4equalnodes(g):
@@ -254,6 +260,10 @@ def is_4equalnodes(g):
 
 def is_all_nodes_rw_2(g):
     return all(v.get_total_rw() == 2 for v in g.v)
+
+
+def all_smaller_than_10(g):
+    return all(v.get_total_rw() < 10 for v in g.v)
 
 
 def print_first_pass(path, groups):
@@ -365,7 +375,7 @@ def main():
     # print(sum(v.get_total_rw() for g in graphs for v in g.v))
     minimal_n, graphs = filter_count(
         graphs,
-        lambda g: not is_4equalnodes(g) or not is_all_nodes_rw_2(g)
+        lambda g: not all_smaller_than_10(g) # not is_4equalnodes(g) or not is_all_nodes_rw_2(g)
     )
     # print(sum(v.get_total_rw() for g in graphs for v in g.v))
     graph_n_threads = [len(set(th for v in g.v for th in v.thread_rw.keys())) for g in graphs]
@@ -379,8 +389,8 @@ def main():
     print("""
 %d cachelines in total. 
 %d cachelines are single threaded (removed).
-%d cacheline graphs have no edges (removed).
-%d graphs are 4 symmetric nodes with r, w = 1, 1
+%d graphs have no edges (removed).
+in %d graphs all nodes have l+s < 10 (removed).
 Remain: %d.
 %d mallocs occurred.
 """ % stats)
