@@ -133,13 +133,12 @@ void free(void *ptr) {
     return __libc_free(ptr);
 }
 
-void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
+inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write) {
-    MallocHookDeactivator deactiv;
     // Quickly return if even not in the range.
-    bool is_heap = (addr >= heapStart && addr < heapEnd);
-    if (!is_heap)
+    if (addr < heapStart || addr >= heapEnd)
         return;
+    MallocHookDeactivator deactiv;
     LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
     deactiv.get_current()->log_load_store(rec, is_write);
 }
