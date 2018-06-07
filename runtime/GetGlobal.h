@@ -34,7 +34,7 @@ void getRegionInfo(std::string &curentry, void **start, void **end) {
 }
 
 // Trying to get information about global regions.
-void getGlobalRegion(void **start, void **end) {
+void getGlobalRegion(uintptr_t *start, uintptr_t *end) {
     using namespace std;
     ifstream iMapfile;
     string curentry;
@@ -70,8 +70,8 @@ void getGlobalRegion(void **start, void **end) {
                 (nextentry.find(" rw-p ") != string::npos)) {
                 getRegionInfo(nextentry, &newstart, &newend);
             }
-            *start = startaddr;
-            *end = newstart == endaddr ? newend : endaddr;
+            *start = (uintptr_t)startaddr;
+            *end = (uintptr_t)(newstart == endaddr ? newend : endaddr);
             break;
         }
     }

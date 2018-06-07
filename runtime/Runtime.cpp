@@ -10,7 +10,7 @@
 
 extern "C" {
 
-void *globalStart, *globalEnd;
+uintptr_t globalStart, globalEnd;
 uintptr_t heapStart = ((uintptr_t) 1 << 63), heapEnd;
 
 void initializer(void) __attribute__((constructor));
@@ -75,6 +75,7 @@ void initializer(void) {
 #endif
     xthread::getInstance().initialize();
     getGlobalRegion(&globalStart, &globalEnd);
+    printf("%p, %p\n", (void*)globalStart, (void*)globalEnd);
     current->malloc_hook_active = true;
 }
 
@@ -136,7 +137,7 @@ void free(void *ptr) {
 inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write) {
     // Quickly return if even not in the range.
-    if (addr < heapStart || addr >= heapEnd)
+    if ((addr < heapStart || addr >= heapEnd) && (addr < globalStart || addr >= globalEnd))
         return;
     MallocHookDeactivator deactiv;
     LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
