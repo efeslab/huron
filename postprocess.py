@@ -38,15 +38,11 @@ def get_malloc_id(addr):
 
 
 class Record:
-    @staticmethod
-    def _calc_cacheline_id(addr):
-        return addr // CACHELINE_SIZE
-
     def __init__(self, line):
         self.thread = int(line[0])
         self.addr = int(line[1], 16)
-        [self.func, self.inst, self.size, self.r, self.w] = [int(xstr) for xstr in line[2:7]]
-        self.cacheline = Record._calc_cacheline_id(self.addr)
+        self.func, self.inst, self.size, self.r, self.w = line[2:7]
+        self.cacheline = self.addr // CACHELINE_SIZE
 
     def __str__(self):
         def print_addr(addr):
@@ -58,7 +54,21 @@ class Record:
         return ','.join([cacheline_str, thread_str, addr_str] + rest)
 
     def get_addr_range(self):
+        if type(self.size) == str:
+            self.size = int(self.size)
         return self.addr, self.addr + self.size
+
+    def get_rw(self):
+        if type(self.r) == str:
+            self.r = int(self.r)
+            self.w = int(self.w)
+        return self.r, self.w
+
+    def get_loc(self):
+        if type(self.func) == str:
+            self.func = int(self.func)
+            self.inst = int(self.inst)
+        return self.func, self.inst
 
 
 class AddrRecord:
@@ -68,18 +78,17 @@ class AddrRecord:
         self.m_id, self.m_start, self.m_end = get_malloc_id(self.start)
         self.clid = clid
         for rec in records:
-            self.thread_rw[rec.thread][0] += rec.r
-            self.thread_rw[rec.thread][1] += rec.w
-            self.pc_rw[(rec.func, rec.inst)][0] += rec.r
-            self.pc_rw[(rec.func, rec.inst)][1] += rec.w
+            r, w = rec.get_rw()
+            loc = rec.get_loc()
+            self.thread_rw[rec.thread][0] += r
+            self.thread_rw[rec.thread][1] += w
+            self.pc_rw[loc][0] += r
+            self.pc_rw[loc][1] += w
 
     def __str__(self):
         start_offset = self.start
         end_offset = self.end
-        if self.m_id == -1:
-            # do nothing
-            pass
-        else:
+        if self.m_id != -1:
             start_offset -= self.m_start
             end_offset -= self.m_start
         return '(%d, %d)(%d)(%d)@%d: %s %s' % (
@@ -141,14 +150,20 @@ class AddrRecord:
             return set()
         return set(self.thread_rw.keys())
 
-    def get_total_rw(self):
-        return sum(rw[0] for rw in self.thread_rw.values()), sum(rw[1] for rw in self.thread_rw.values())
+    @staticmethod
+    def get_total_rw(thread_rws):
+        all_rws = [rw for d in thread_rws for rw in d.values()]
+        return sum(rw[0] for rw in all_rws), sum(rw[1] for rw in all_rws)
 
     def is_read_only(self):
         for r, w in self.thread_rw.values():
             if w != 0:
                 return False
         return True
+
+    def thread_rw_excluding(self, exclude_threads):
+        include_threads = set(self.thread_rw.keys()) - set(exclude_threads)
+        return dict((t, self.thread_rw[t]) for t in include_threads)
 
 
 def get_groups_from_log(file):
@@ -177,9 +192,13 @@ class Graph:
             self.threads = threads
             self.records = records
 
-        def get_group_rw(self):
-            rs, ws = zip(*(r.get_total_rw() for r in self.records))
-            return sum(rs), sum(ws)
+        @staticmethod
+        def rhs_rw_suffer_from_lhs(lhs, rhs):
+            lhs_rw = AddrRecord.get_total_rw(l.thread_rw for l in lhs.records)
+            rhs_minus_lhs_rw = AddrRecord.get_total_rw(r.thread_rw_excluding(lhs.threads) for r in rhs.records)
+            lr, lw = lhs_rw
+            rr, rw = rhs_minus_lhs_rw
+            return min(lw, rr + rw)
 
         def __str__(self):
             import io
@@ -205,6 +224,7 @@ class Graph:
     def __str__(self):
         import io
         with io.StringIO() as output:
+            print('>>>%d<<<' % self.estm_false_sharing(), file=output)
             for grp in self.groups:
                 print(grp, file=output, end='')
             print('\n', file=output)
@@ -221,22 +241,16 @@ class Graph:
     def is_complete_graph(self):
         return len(self.groups) == 1
 
-    def max_min_rw(self):
-        max_rw = None
+    def estm_false_sharing(self):
+        total_rw = 0
         for i in range(len(self.groups)):
+            max_rw = 0
             for j in range(i + 1, len(self.groups)):
-                if i == j:
-                    continue
-                ir, iw = self.groups[i].get_group_rw()
-                jr, jw = self.groups[j].get_group_rw()
-                irwjw = min(ir + iw, jw)
-                jrwiw = min(jr + jw, iw)
-                rw = max(irwjw, jrwiw)
-                if max_rw is None:
-                    max_rw = rw
-                else:
-                    max_rw = max(max_rw, rw)
-        return max_rw
+                ij_rw = self.GraphGroup.rhs_rw_suffer_from_lhs(self.groups[i], self.groups[j])
+                ji_rw = self.GraphGroup.rhs_rw_suffer_from_lhs(self.groups[j], self.groups[i])
+                max_rw = max(max_rw, ij_rw, ji_rw)
+            total_rw += max_rw
+        return total_rw
 
 
 def disp_thread_per_cl(graphs):
@@ -279,6 +293,11 @@ def append_csv_file(path, csv_line):
         print(csv_line, file=f)
 
 
+def cl_multi_threaded(group):
+    threads = set([rec.thread for rec in group])
+    return len(threads) != 1
+
+
 def main():
     args = sys.argv
     if len(args) != 2:
@@ -289,24 +308,40 @@ def main():
     with open(path, 'r') as f:
         groups = get_groups_from_log(f)
         n = len(groups)
+    
+    single_n, groups = filter_count(groups, lambda group: cl_multi_threaded(group[1]))
+
     addrrec_groups = [
         (clid, AddrRecord.from_cacheline_records(clid, group))
         for clid, group in groups
     ]
 
     graphs = [Graph(clid, group) for clid, group in addrrec_groups]
-    noedge_n, graphs = filter_count(graphs, lambda g: not g.is_complete_graph())
-    minimal_n, graphs = filter_count(graphs, lambda g: g.max_min_rw() >= 20)
+    noedge_n, graphs = 0, graphs  # filter_count(graphs, lambda g: not g.is_complete_graph())
+    minimal_n, graphs = 0, graphs  # filter_count(graphs, lambda g: g.estm_false_sharing() >= 20)
 
-    disp_thread_per_cl(graphs)
+    total = 0
+    mallocs_fs = defaultdict(int)
+    for g in graphs:
+        fs = g.estm_false_sharing()
+        total += fs
+        involved_mallocs = set(v0.m_id for v0 in g.v)
+        for m in involved_mallocs:
+            mallocs_fs[m] += fs
+
+    print("Estimated false sharing in total: %d" % total)
+    print("For all mallocs: %s" % mallocs_fs)
+
+    # disp_thread_per_cl(graphs)
     print_final(path, graphs)
     print_malloc(path, graphs)
 
-    stats = n, noedge_n, minimal_n, n - noedge_n - minimal_n, len(mallocIds)
+    stats = n, single_n, noedge_n, minimal_n, n - noedge_n - minimal_n - single_n, len(mallocIds)
     print("""
 %d cachelines in total. 
+%d cachelines are single threaded (removed).
 %d cachelines (graphs) have no false sharing (removed).
-%d graphs have max_min_rw < 20 (removed).
+%d graphs have estm_false_sharing < 20 (removed).
 Remain: %d.
 %d mallocs occurred.
 """ % stats)
