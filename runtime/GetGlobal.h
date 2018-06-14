@@ -47,13 +47,8 @@ void getGlobalRegion(uintptr_t *start, uintptr_t *end) {
     }
 
     // Now we analyze each line of this maps file.
-    bool toExit = false;
-    bool toSaveRegion = false;
-
     void *startaddr, *endaddr;
     string nextentry;
-    int globalCount = 0;
-    int prevRegionNumb = 0;
 
     while (getline(iMapfile, curentry)) {
         // Check the globals for the application. It is at the first entry
@@ -66,10 +61,8 @@ void getGlobalRegion(uintptr_t *start, uintptr_t *end) {
 
             void *newstart;
             void *newend;
-            if (nextentry.find("lib") == string::npos ||
-                (nextentry.find(" rw-p ") != string::npos)) {
-                getRegionInfo(nextentry, &newstart, &newend);
-            }
+            assert(nextentry.find("lib") == string::npos || (nextentry.find(" rw-p ") != string::npos));
+            getRegionInfo(nextentry, &newstart, &newend);
             *start = (uintptr_t)startaddr;
             *end = (uintptr_t)(newstart == endaddr ? newend : endaddr);
             break;

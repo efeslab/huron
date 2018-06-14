@@ -109,7 +109,6 @@ public:
     /// Create the wrapper 
     /// @ Intercepting the thread_creation operation.
     int thread_create(pthread_t *tid, const pthread_attr_t *attr, threadFunction *fn, void *arg) {
-        void *ptr = nullptr;
         int tindex;
         int result;
 
@@ -162,7 +161,7 @@ public:
 
     void flush_all_concat_to(const std::string &output_name) {
         // Should be run with all other threads finished.
-        assert(!isMultithreading);
+        // assert(!isMultithreading);
         // Then we first flush ourselves,
         _threads[0].flush_log();
         // and append files together. Remember to CLOSE all the files to apply changes.
