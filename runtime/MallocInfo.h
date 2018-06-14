@@ -20,6 +20,8 @@ class MallocInfo {
     size_t malloc_id;
     FILE *file;
 public:
+    static const size_t nfound = ~0UL;
+
     MallocInfo() : malloc_id(0) {
         file = fopen("mallocIds.csv", "w");
     }
@@ -31,6 +33,19 @@ public:
 
     void insert(uintptr_t start, size_t size) {
         data.emplace(start, MallocIdSize(malloc_id++, size));
+    }
+
+    bool erase(uintptr_t start) {
+        auto it = data.find(start);
+        if (it == data.end())
+            return false;
+        data.erase(it);
+        return true;
+    }
+
+    size_t get_size(uintptr_t addr) {
+        auto it = data.find(addr);
+        return it == data.end() ? nfound : it->second.size;
     }
 
     MallocIdSize find_id_offset(uintptr_t addr) {

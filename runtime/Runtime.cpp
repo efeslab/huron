@@ -2,25 +2,24 @@
 #include <vector>
 #include <mutex>
 #include <unordered_map>
-#include <pthread.h>
 
 #include "MemArith.h"
 #include "xthread.h"
 #include "GetGlobal.h"
+#include "Segment.h"
 
 extern "C" {
 
 uintptr_t globalStart, globalEnd;
-uintptr_t heapStart = ((uintptr_t) 1 << 63), heapEnd;
+AddrSeg heap(((uintptr_t) 1 << 63), 0);
 
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
-void *malloc(size_t size) noexcept;
 
 void *__libc_malloc(size_t size);
 void __libc_free(void *ptr);
+void *__libc_realloc(void *ptr, size_t size);
 
-// void free(void *ptr);
 void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write);
 
@@ -91,57 +90,74 @@ void finalizer(void) {
     xthread::getInstance().flush_all_concat_to("record.log");
 }
 
-void *my_malloc_hook(size_t size, const void *caller) {
+void *my_malloc_hook(size_t size) {
     // RAII deactivate malloc hook so that we can use malloc below.
     MallocHookDeactivator deactiv;
-    // void *start_ptr = malloc(size);
-    size = round_up_size(size, cacheline_size_power);
-    void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
-    uintptr_t start = (uintptr_t)start_ptr, end = start + size;
+    void *start_ptr = __libc_malloc(size);
+    // size = round_up_size(size, cacheline_size_power);
+    // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
     // Only record thread 0.
-    if (deactiv.get_current()->index != 0)
-        return start_ptr;
-    // The 3 lines below are single threaded.
-    heapStart = std::min(heapStart, start);
-    heapEnd = std::max(heapEnd, end);
-    malloc_sizes.insert(start, size);
-#ifdef DEBUG
-    // printf("malloc(%lu) returns %p\n", size, start_ptr);
-    // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
-#endif
+    if (deactiv.get_current()->index == 0) {
+        auto start = (uintptr_t) start_ptr;
+        AddrSeg seg(start, start + size);
+        // Global, single-threaded
+        heap.insert(seg);
+        malloc_sizes.insert(start, size);
+    }
     return start_ptr;
 }
 
+void *my_realloc_hook(void *ptr, size_t size) {
+    // RAII deactivate malloc hook so that we can use realloc below.
+    MallocHookDeactivator deactiv;
+#ifdef DEBUG
+    printf("realloc(%p, %lu)\n", ptr, size);
+#endif
+    void *new_start_ptr = __libc_realloc(ptr, size);
+    // Only record thread 0.
+    if (deactiv.get_current()->index == 0) {
+        if (ptr) {
+            auto old_start = (uintptr_t) ptr;
+            size_t old_size = malloc_sizes.get_size(old_start);
+            assert(old_size != MallocInfo::nfound);
+            // Global, single-threaded
+            heap.shrink(AddrSeg(old_start, old_size));
+            assert(malloc_sizes.erase(old_start));
+        }
+        auto new_start = (uintptr_t) new_start_ptr;
+        // Global, single-threaded
+        heap.insert(AddrSeg(new_start, size));
+        malloc_sizes.insert(new_start, size);
+    }
+    return new_start_ptr;
+}
+
 void *malloc(size_t size) noexcept {
-    void *caller = __builtin_return_address(0);
+    // void *caller = __builtin_return_address(0);
     if (current && current->malloc_hook_active)
-        return my_malloc_hook(size, caller);
+        return my_malloc_hook(size);
     return __libc_malloc(size);
 }
 
 void *calloc(size_t n, size_t size) {
     size_t total = n * size;
     void *p = malloc(total);
-    if (!p)
-        return NULL;
-    return memset(p, 0, total);
+    return p ? memset(p, 0, total) : nullptr;
 }
 
 void *realloc(void *ptr, size_t size) {
-    return NULL;
+    if (current && current->malloc_hook_active)
+        return my_realloc_hook(ptr, size);
+    return __libc_realloc(ptr, size);
 }
 
-void my_free_hook(void *ptr, const void *caller) {
+void my_free_hook(void *ptr) {
     // RAII deactivate malloc hook so that we can use free below.
     MallocHookDeactivator deactiv;
     free(ptr);
-#ifdef DEBUG
-    printf("free(%p) called from %p\n", ptr, caller);
-#endif
 }
 
 void free(void *ptr) {
-    void *caller = __builtin_return_address(0);
     // if (current && current->malloc_hook_active)
     // return my_free_hook(ptr, caller);
     return __libc_free(ptr);
@@ -150,7 +166,7 @@ void free(void *ptr) {
 inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write) {
     // Quickly return if even not in the range.
-    if ((addr < heapStart || addr >= heapEnd) && (addr < globalStart || addr >= globalEnd))
+    if (heap.contain(addr) && (addr < globalStart || addr >= globalEnd))
         return;
     MallocHookDeactivator deactiv;
     LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
