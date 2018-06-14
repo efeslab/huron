@@ -16,8 +16,10 @@ uintptr_t heapStart = ((uintptr_t) 1 << 63), heapEnd;
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
 void *malloc(size_t size) noexcept;
+
 void *__libc_malloc(size_t size);
 void __libc_free(void *ptr);
+
 // void free(void *ptr);
 void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write);
@@ -55,7 +57,7 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 }
 
 MallocInfo malloc_sizes;
-std::mutex other_globals_lock;
+std::mutex globals_lock;
 
 class MallocHookDeactivator {
     Thread *current_copy;
@@ -117,6 +119,17 @@ void *malloc(size_t size) noexcept {
     return __libc_malloc(size);
 }
 
+void *calloc(size_t n, size_t size) {
+    size_t total = n * size;
+    void *p = malloc(total);
+    if (!p)
+        return NULL;
+    return memset(p, 0, total);
+}
+
+void *realloc(void *ptr, size_t size) {
+    return NULL;
+}
 
 void my_free_hook(void *ptr, const void *caller) {
     // RAII deactivate malloc hook so that we can use free below.
