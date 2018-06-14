@@ -160,19 +160,18 @@ public:
     }
 
     void flush_all_concat_to(const std::string &output_name) {
+        assert(current->index == 0);
         // Should be run with all other threads finished.
-        // assert(!isMultithreading);
+        while (!isMultithreading);
         // Then we first flush ourselves,
         _threads[0].flush_log();
         // and append files together. Remember to CLOSE all the files to apply changes.
         for (int i = 0; i < _threadIndex; i++) {
             _threads[i].close_buffer();
             std::string cat_cmd = "cat " + _threads[i].get_filename() + " >> " + output_name;
-            if (system(cat_cmd.c_str()))
-                throw std::system_error();
+            system(cat_cmd.c_str());
             std::string rm_cmd = "rm " + _threads[i].get_filename();
-            if (system(rm_cmd.c_str()))
-                throw std::system_error();
+            system(rm_cmd.c_str());
         }
         std::string wc_out_cmd = "wc -l " + output_name;
         system(wc_out_cmd.c_str());

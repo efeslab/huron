@@ -37,5 +37,6 @@ std::string Thread::get_filename() {
 }
 
 void Thread::close_buffer() {
-    fclose(this->buffer_f);
+    if (this->buffer_f)
+        fclose(this->buffer_f);
 }

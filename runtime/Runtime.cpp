@@ -2,6 +2,7 @@
 #include <vector>
 #include <mutex>
 #include <unordered_map>
+#include <csignal>
 
 #include "MemArith.h"
 #include "xthread.h"
@@ -70,10 +71,24 @@ public:
     }
 };
 
+//void got_signal(int x) {
+//    finalizer();
+//    exit(x);
+//}
+//
+//void set_sigint_handler() {
+//    struct sigaction sa{};
+//    memset(&sa, 0, sizeof(sa));
+//    sa.sa_handler = got_signal;
+//    sigfillset(&sa.sa_mask);
+//    sigaction(SIGINT, &sa, nullptr);
+//}
+
 void initializer(void) {
 #ifdef DEBUG
     printf("Initializing...\n");
 #endif
+    // set_sigint_handler();
     xthread::getInstance().initialize();
     getGlobalRegion(&globalStart, &globalEnd);
     printf("%p, %p\n", (void*)globalStart, (void*)globalEnd);
@@ -164,9 +179,9 @@ void free(void *ptr) {
 }
 
 inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
-                   size_t size, bool is_write) {
+                          size_t size, bool is_write) {
     // Quickly return if even not in the range.
-    if (heap.contain(addr) && (addr < globalStart || addr >= globalEnd))
+    if (!heap.contain(addr) && (addr < globalStart || addr >= globalEnd))
         return;
     MallocHookDeactivator deactiv;
     LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
