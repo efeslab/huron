@@ -94,6 +94,8 @@ struct Instrumenter : public FunctionPass {
 char Instrumenter::ID = 0;
 static RegisterPass<Instrumenter>
     instrumenter("instrumenter", "Instrumenting READ/WRITE pass", false, false);
+static cl::opt<int> startFrom(
+    "start-from", cl::init(0), cl::desc("Start function id from N"), cl::Hidden);
 static cl::opt<int> maxInsPerBB(
     "max-ins-per-bb", cl::init(10000),
     cl::desc("maximal number of instructions to instrument in any given BB"),
@@ -131,7 +133,7 @@ bool Instrumenter::doInitialization(Module &M) {
     // if (!TD)
     //   return false;
 
-    funcCounter = 0;
+    funcCounter = startFrom;
 
     context = &(M.getContext());
     LongSize = TD->getPointerSizeInBits();
@@ -261,9 +263,6 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
     CallInst *Call =
         IRB.CreateCall(accessCallback[isWrite][accessSizeArrayIndex],
                        ArrayRef<Value *>(arguments));
-    errs() << "Generated function call:\n\t";
-    Call->print(errs());
-    errs() << "\n";
 
     // We don't do Call->setDoesNotReturn() because the BB already has
     // UnreachableInst at the end.
@@ -286,6 +285,11 @@ void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
 
     Value *actualAddr = IRB.CreatePointerCast(addr, intptrType);
     size_t accessSizeArrayIndex = TypeSizeToSizeIndex(typeSize);
+
+    dbgs() << "Generated function call: " 
+           << (isWrite ? "store" : "load")
+           << " size = " << typeSize
+           << "funcId, instId = " << funcId << ", " << instCounter << "\n";
 
     // Insert the callback function here.
     insertAccessCallback(origIns, actualAddr, isWrite, accessSizeArrayIndex,
@@ -339,12 +343,12 @@ bool Instrumenter::runOnFunction(Function &F) {
         return false;
 
     // Get loop info for this function.
-    if (!F.isDeclaration()) {
-        // generate the LoopInfoBase for the current function
-        LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-        for (Loop *L : LI) 
-            printLoop(L);
-    }
+    // if (!F.isDeclaration()) {
+    //     // generate the LoopInfoBase for the current function
+    //     LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    //     for (Loop *L : LI) 
+    //         printLoop(L);
+    // }
 
     int thisFuncId = funcCounter++;
     funcNames.insert(std::make_pair(thisFuncId, F.getName()));
