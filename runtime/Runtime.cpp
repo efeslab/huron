@@ -91,12 +91,11 @@ void *my_malloc_hook(size_t size) {
     void *start_ptr = __libc_malloc(size);
     // size = round_up_size(size, cacheline_size_power);
     // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
+    // RAII deactivate malloc hook so that we can use malloc below.
+    MallocHookDeactivator deactiv;
     // Only record thread 0.
-    // if (deactiv.get_current()->index == 0) {
-    {
-        // RAII deactivate malloc hook so that we can use malloc below.
-        MallocHookDeactivator deactiv;
-        std::lock_guard<std::mutex> lock_guard(globals_lock);
+    if (deactiv.get_current()->index == 0) {
+        // std::lock_guard<std::mutex> lock_guard(globals_lock);
         // Global, single-threaded
         malloc_sizes.insert((uintptr_t) start_ptr, size);
     }
@@ -105,12 +104,11 @@ void *my_malloc_hook(size_t size) {
 
 void *my_realloc_hook(void *ptr, size_t size) {
     void *new_start_ptr = __libc_realloc(ptr, size);
+    // RAII deactivate malloc hook so that we can use realloc below.
+    MallocHookDeactivator deactiv;
     // Only record thread 0.
-    // if (deactiv.get_current()->index == 0) {
-    {
-        // RAII deactivate malloc hook so that we can use realloc below.
-        MallocHookDeactivator deactiv;
-        std::lock_guard<std::mutex> lock_guard(globals_lock);
+    if (deactiv.get_current()->index == 0) {
+        // std::lock_guard<std::mutex> lock_guard(globals_lock);
         if (ptr) {
 #ifdef DEBUG
             printf("realloc(%p, %lu)\n", ptr, size);
@@ -131,12 +129,12 @@ int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
 #ifdef DEBUG
     // printf("posix_memalign(%p, %lu, %lu)\n", *memptr, alignment, size);
 #endif
+    // RAII deactivate malloc hook so that we can use malloc below.
+    MallocHookDeactivator deactiv;
     // Only record thread 0.
-    // if (deactiv.get_current()->index == 0) {
-    {
-        // RAII deactivate malloc hook so that we can use malloc below.
-        MallocHookDeactivator deactiv;
-        std::lock_guard<std::mutex> lock_guard(globals_lock);
+    if (deactiv.get_current()->index == 0) {
+
+        // std::lock_guard<std::mutex> lock_guard(globals_lock);
         // Global, single-threaded
         malloc_sizes.insert((uintptr_t) *memptr, size);
     }

@@ -181,8 +181,8 @@ struct AddrRecord {
         string malloc = (rec.malloc.id == MallocInfo::failed_value().id ? "X" : to_string(rec.malloc.id));
         os << malloc << "+(" << hex << "0x" << rec.start << ", 0x" << rec.end << ')' << dec << ": ";
         print_map(os, rec.thread_rw);
-//        os << "  ";
-//        print_map(os, rec.pc_rw);
+        os << "  ";
+        print_map(os, rec.pc_rw);
         return os;
     }
 
@@ -320,7 +320,7 @@ struct Graph {
     }
 
     bool operator<(const Graph &rhs) const {
-        return clid < rhs.clid;
+        return estm_fs < rhs.estm_fs;
     }
 
     friend ostream &operator<<(ostream &os, const Graph &g) {
@@ -398,7 +398,7 @@ int main(int argc, char *argv[]) {
         graphs.emplace_back(move(pair));
     unordered_map<size_t, vector<AddrRecord>>().swap(addrrec_groups);
 
-    size_t small_n = remove_erase_count_if(graphs, [](const Graph &g) { return g.estm_fs < 20; });
+    size_t small_n = remove_erase_count_if(graphs, [](const Graph &g) { return g.estm_fs < 1000; });
 
     sort(graphs.begin(), graphs.end());
     print_final(path, graphs);
