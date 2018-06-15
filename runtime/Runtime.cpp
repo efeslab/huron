@@ -7,7 +7,7 @@
 #include "MemArith.h"
 #include "xthread.h"
 #include "GetGlobal.h"
-#include "Segment.h"
+#include "MallocInfo.h"
 
 extern "C" {
 
@@ -55,18 +55,6 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 MallocInfo malloc_sizes;
 std::mutex globals_lock;
 
-class MallocHookDeactivator {
-    Thread *current_copy;
-public:
-    MallocHookDeactivator() noexcept: current_copy(current) { current_copy->all_hooks_active = false; }
-
-    ~MallocHookDeactivator() noexcept { current_copy->all_hooks_active = true; }
-
-    Thread *get_current() {
-        return current_copy;
-    }
-};
-
 void initializer(void) {
 #ifdef DEBUG
     printf("Initializing...\n");
@@ -82,7 +70,6 @@ void finalizer(void) {
 #ifdef DEBUG
     printf("Finalizing...\n");
 #endif
-    malloc_sizes.dump();
     xthread::getInstance().flush_all();
     // xthread::getInstance().flush_all_concat_to("record.log");
 }
@@ -92,7 +79,7 @@ void *my_malloc_hook(size_t size) {
     // size = round_up_size(size, cacheline_size_power);
     // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
     // RAII deactivate malloc hook so that we can use malloc below.
-    MallocHookDeactivator deactiv;
+    HookDeactivator deactiv;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
         // Global, single-threaded
@@ -104,7 +91,7 @@ void *my_malloc_hook(size_t size) {
 void *my_realloc_hook(void *ptr, size_t size) {
     void *new_start_ptr = __libc_realloc(ptr, size);
     // RAII deactivate malloc hook so that we can use realloc below.
-    MallocHookDeactivator deactiv;
+    HookDeactivator deactiv;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
         if (ptr) {
@@ -128,7 +115,7 @@ int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
     // printf("posix_memalign(%p, %lu, %lu)\n", *memptr, alignment, size);
 #endif
     // RAII deactivate malloc hook so that we can use malloc below.
-    MallocHookDeactivator deactiv;
+    HookDeactivator deactiv;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
         // Global, single-threaded
@@ -164,7 +151,7 @@ int posix_memalign(void **memptr, size_t alignment, size_t size) {
 
 void my_free_hook(void *ptr) {
     // RAII deactivate malloc hook so that we can use free below.
-    MallocHookDeactivator deactiv;
+    HookDeactivator deactiv;
     if (ptr && deactiv.get_current()->index == 0)
         malloc_sizes.erase((uintptr_t) ptr);
     __libc_free(ptr);
@@ -182,15 +169,16 @@ inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                           size_t size, bool is_write) {
     // If on heap:
     if (malloc_sizes.contain(addr)) {
-        MallocHookDeactivator deactiv;
+        HookDeactivator deactiv;
         MallocIdSize id_offset;
         bool is_recorded = malloc_sizes.find_id_offset(addr, id_offset);
         if (is_recorded) {
-            LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, id_offset);
+            LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size,
+                                      (uint32_t) id_offset.id, (uint32_t) id_offset.size);
             deactiv.get_current()->log_load_store(rec, is_write);
         }
     } else if (addr >= globalStart && addr < globalEnd) { // If on global:
-        MallocHookDeactivator deactiv;
+        HookDeactivator deactiv;
         LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
         deactiv.get_current()->log_load_store(rec, is_write);
     }
@@ -200,7 +188,7 @@ inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
 int pthread_create(pthread_t *tid, const pthread_attr_t *attr,
                    void *(*start_routine)(void *), void *arg) {
     if (current && current->all_hooks_active) {
-        MallocHookDeactivator deactiv;
+        HookDeactivator deactiv;
         int res = xthread::getInstance().thread_create(tid, attr, start_routine, arg);
         return res;
     } else

@@ -3,7 +3,6 @@
 
 #include <pthread.h>
 #include <unordered_map>
-#include "MallocInfo.h"
 
 typedef void *threadFunction(void *);
 
@@ -15,9 +14,10 @@ struct LocRecord {
     bool is_heap;
     uint32_t m_id, m_offset;
 
-    LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size, MallocIdSize &info) :
+    LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size,
+              uint32_t m_id, uint32_t m_size) :
             addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size),
-            is_heap(true), m_id((uint32_t) info.id), m_offset((uint32_t) info.size) {}
+            is_heap(true), m_id(m_id), m_offset(m_size) {}
 
     LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size) :
             addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size),
@@ -97,6 +97,20 @@ struct Thread {
     void open_buffer();
 
     void close_buffer();
+};
+
+extern __thread Thread *current;
+
+class HookDeactivator {
+    Thread *current_copy;
+public:
+    HookDeactivator() noexcept: current_copy(current) { current_copy->all_hooks_active = false; }
+
+    ~HookDeactivator() noexcept { current_copy->all_hooks_active = true; }
+
+    Thread *get_current() {
+        return current_copy;
+    }
 };
 
 #endif
