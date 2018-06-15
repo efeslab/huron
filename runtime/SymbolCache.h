@@ -9,9 +9,26 @@
 #include <cstddef>
 #include <vector>
 #include <execinfo.h>
+#include <cxxabi.h>
+
 
 class SymbolCache {
     std::unordered_map<void *, std::string> addresses;
+
+    std::string demangle(const char *const symbol) {
+        std::string symbol_str(symbol);
+        size_t begin = symbol_str.find('(');
+        if (begin == std::string::npos)
+            return symbol;
+        size_t end = symbol_str.find('+', begin);
+        if (end == std::string::npos)
+            return symbol;
+        symbol_str = symbol_str.substr(begin + 1, end - begin - 1);
+        const std::unique_ptr<char, decltype(&std::free)> demangled(
+                abi::__cxa_demangle(symbol_str.c_str(), 0, 0, 0), &std::free);
+        return demangled ? demangled.get() : symbol_str;
+    }
+
 public:
     void insert_range(void **begin, void **end) {
         std::vector<void *> not_found;
@@ -20,9 +37,9 @@ public:
             if (it == addresses.end())
                 not_found.push_back(*begin);
         }
-        char **string_bufs = backtrace_symbols(not_found.data(), (int)not_found.size());
+        char **string_bufs = backtrace_symbols(not_found.data(), (int) not_found.size());
         for (size_t i = 0; i < not_found.size(); i++)
-            addresses.emplace(not_found[i], string_bufs[i]);
+            addresses.emplace(not_found[i], demangle(string_bufs[i]));
         free(string_bufs);
     }
 
