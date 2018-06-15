@@ -1,4 +1,5 @@
-#include "MemArith.h"
+#ifndef SEGMENT_H
+#define SEGMENT_H
 
 template <typename T>
 class Segment {
@@ -30,3 +31,5 @@ public:
 };
 
 typedef Segment<uintptr_t> AddrSeg;
+
+#endif

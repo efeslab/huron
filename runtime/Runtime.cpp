@@ -12,7 +12,7 @@
 extern "C" {
 
 uintptr_t globalStart, globalEnd;
-AddrSeg heap(((uintptr_t) 1 << 63), 0);
+
 
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
@@ -97,11 +97,8 @@ void *my_malloc_hook(size_t size) {
         // RAII deactivate malloc hook so that we can use malloc below.
         MallocHookDeactivator deactiv;
         std::lock_guard<std::mutex> lock_guard(globals_lock);
-        auto start = (uintptr_t) start_ptr;
-        AddrSeg seg(start, start + size);
         // Global, single-threaded
-        heap.insert(seg);
-        malloc_sizes.insert(start, size);
+        malloc_sizes.insert((uintptr_t) start_ptr, size);
     }
     return start_ptr;
 }
@@ -118,16 +115,11 @@ void *my_realloc_hook(void *ptr, size_t size) {
 #ifdef DEBUG
             printf("realloc(%p, %lu)\n", ptr, size);
 #endif
-            auto old_start = (uintptr_t) ptr;
-            size_t old_size = malloc_sizes.get_size(old_start);
-            assert(old_size != MallocInfo::nfound);
             // Global, single-threaded
-            heap.shrink(AddrSeg(old_start, old_size));
+            assert(malloc_sizes.erase((uintptr_t) ptr));
         }
-        auto new_start = (uintptr_t) new_start_ptr;
         // Global, single-threaded
-        heap.insert(AddrSeg(new_start, size));
-        malloc_sizes.insert(new_start, size);
+        malloc_sizes.insert((uintptr_t) new_start_ptr, size);
     }
     return new_start_ptr;
 }
@@ -145,11 +137,8 @@ int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
         // RAII deactivate malloc hook so that we can use malloc below.
         MallocHookDeactivator deactiv;
         std::lock_guard<std::mutex> lock_guard(globals_lock);
-        auto start = (uintptr_t) *memptr;
-        AddrSeg seg(start, start + size);
         // Global, single-threaded
-        heap.insert(seg);
-        malloc_sizes.insert(start, size);
+        malloc_sizes.insert((uintptr_t) *memptr, size);
     }
     return code;
 }
@@ -182,19 +171,22 @@ int posix_memalign(void **memptr, size_t alignment, size_t size) {
 void my_free_hook(void *ptr) {
     // RAII deactivate malloc hook so that we can use free below.
     MallocHookDeactivator deactiv;
-    free(ptr);
+    std::lock_guard<std::mutex> lock_guard(globals_lock);
+    if (ptr)
+        malloc_sizes.erase((uintptr_t) ptr);
+    __libc_free(ptr);
 }
 
 void free(void *ptr) {
-    // if (current && current->all_hooks_active)
-    // return my_free_hook(ptr, caller);
+    if (current && current->all_hooks_active)
+        return my_free_hook(ptr);
     return __libc_free(ptr);
 }
 
 inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                           size_t size, bool is_write) {
     // Quickly return if even not in the range.
-    if (!heap.contain(addr) && (addr < globalStart || addr >= globalEnd))
+    if (!malloc_sizes.contain(addr) && (addr < globalStart || addr >= globalEnd))
         return;
     MallocHookDeactivator deactiv;
     LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
@@ -208,7 +200,6 @@ int pthread_create(pthread_t *tid, const pthread_attr_t *attr,
         MallocHookDeactivator deactiv;
         int res = xthread::getInstance().thread_create(tid, attr, start_routine, arg);
         return res;
-    }
-    else
+    } else
         return __internal_pthread_create(tid, attr, start_routine, arg);
 }

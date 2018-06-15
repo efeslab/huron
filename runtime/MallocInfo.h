@@ -8,6 +8,7 @@
 #include <map>
 #include <sstream>
 #include <vector>
+#include "Segment.h"
 
 struct MallocIdSize {
     size_t id, size;
@@ -17,13 +18,14 @@ struct MallocIdSize {
 
 class MallocInfo {
     // This is an (ordered) map because we need to query lower bound for incoming access addresses.
-    std::unordered_map<uintptr_t, MallocIdSize> data_alive;
+    std::map<uintptr_t, MallocIdSize> data_alive;
     std::vector<std::pair<uintptr_t, size_t>> data_total;
+    AddrSeg heap;
     FILE *file;
 public:
-    static const size_t nfound = ~0UL;
+    static const size_t nfound = ~0LU;
 
-    MallocInfo() {
+    MallocInfo(): heap(~0LU, 0) {
         file = fopen("mallocIds.csv", "w");
     }
 
@@ -36,11 +38,33 @@ public:
         size_t id = data_total.size();
         data_alive[start] = MallocIdSize(id, size);
         data_total.emplace_back(start, size);
+        heap.insert(AddrSeg(start, start + size));
     }
 
-    size_t get_size(uintptr_t addr) {
+    bool erase(uintptr_t addr) {
         auto it = data_alive.find(addr);
-        return it == data_alive.end() ? nfound : it->second.size;
+        if (it == data_alive.end())
+            return false;
+        size_t size = it->second.size;
+        heap.shrink(AddrSeg(addr, size));
+        data_alive.erase(it);
+        return true;
+    }
+
+    inline bool contain(uintptr_t addr) {
+        return heap.contain(addr);
+    }
+
+    MallocIdSize find_id_offset(uintptr_t addr) {
+        // Find the first starting address greater than `addr`, then it--
+        // to get where `addr` falls in.
+        auto it = data_alive.upper_bound(addr);
+        if (it != data_alive.begin()) {
+            it--;
+            if (it->first + it->second.size > addr)
+                return MallocIdSize(it->second.id, addr - it->first);
+        }
+        throw std::invalid_argument("");
     }
 
     ~MallocInfo() {

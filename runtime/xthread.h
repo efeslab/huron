@@ -89,8 +89,8 @@ public:
         current = (Thread *) arg;
         // Get current from the TLS storage. Start the thread main routine.
         void *result = current->startRoutine(current->startArg);
-        // We are done. Remove this thread.
-        xthread::getInstance().removeThread(current);
+        // We are done. Remove one thread.
+        xthread::getInstance().removeThread();
         return result;
     }
 
@@ -122,7 +122,7 @@ public:
 //    }
 
 private:
-    void removeThread(Thread *thread) {
+    void removeThread() {
         std::lock_guard<std::mutex> lg(_lock);
         --_aliveThreads;
     }
