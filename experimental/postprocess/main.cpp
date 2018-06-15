@@ -100,8 +100,8 @@ struct AllMallocs {
         while (getline(malloc, line)) {
             const auto &fields = csv.read_csv_line(line);
             size_t id = to_integral<size_t>(fields[0]),
-                    start = to_address(fields[1]), 
-                    size = to_integral<size_t>(fields[2]), 
+                    start = to_address(fields[1]),
+                    size = to_integral<size_t>(fields[2]),
                     end = start + size;
             mallocs.emplace_back(id, start, end);
         }
@@ -143,14 +143,14 @@ struct Record {
         if (line.empty())
             return is;
         const auto &fields = csv.read_csv_line(line);
-        rec.thread = to_integral<uint16_t>(fields[0]); 
-        rec.addr = to_address(fields[1]); 
+        rec.thread = to_integral<uint16_t>(fields[0]);
+        rec.addr = to_address(fields[1]);
         rec.cacheline = rec.addr / CACHELINE;
-        rec.pc.func = to_integral<uint16_t>(fields[2]); 
-        rec.pc.inst = to_integral<uint16_t>(fields[3]); 
-        rec.size = to_integral<uint16_t>(fields[4]); 
-        rec.rw.r = to_integral<uint32_t>(fields[5]); 
-        rec.rw.w = to_integral<uint32_t>(fields[6]); 
+        rec.pc.func = to_integral<uint16_t>(fields[2]);
+        rec.pc.inst = to_integral<uint16_t>(fields[3]);
+        rec.size = to_integral<uint16_t>(fields[4]);
+        rec.rw.r = to_integral<uint32_t>(fields[5]);
+        rec.rw.w = to_integral<uint32_t>(fields[6]);
 
         return is;
     }
@@ -178,13 +178,11 @@ struct AddrRecord {
     }
 
     friend ostream &operator<<(ostream &os, const AddrRecord &rec) {
-        os << '(' << rec.start << ", " << rec.end << ')'
-           << '(' << rec.end - rec.start << ')'
-           << '(' << rec.malloc.id << ')'
-           << '@' << rec.clid << ": ";
+        string malloc = (rec.malloc.id == MallocInfo::failed_value().id ? "X" : to_string(rec.malloc.id));
+        os << malloc << "+(" << hex << "0x" << rec.start << ", 0x" << rec.end << ')' << dec << ": ";
         print_map(os, rec.thread_rw);
-        os << "  ";
-        print_map(os, rec.pc_rw);
+//        os << "  ";
+//        print_map(os, rec.pc_rw);
         return os;
     }
 
@@ -192,7 +190,7 @@ struct AddrRecord {
         uint32_t max_th = 0;
         for (const auto &p: thread_rw)
             max_th = max(max_th, p.first);
-        vector<bool> threads(max_th);
+        vector<bool> threads(max_th + 1);
         for (const auto &p: thread_rw)
             threads[p.first] = true;
         return threads;
@@ -229,6 +227,7 @@ struct AddrRecord {
         // Each record can be seen as a line segment[addr, addr + size)
         // First, get all _unique_ start and end points; they are breakpoints.
         bool breakpoints[CACHELINE];
+        memset(breakpoints, 0, CACHELINE);
         for (const Record &rec: records) {
             auto seg = rec.get_addr_range();
             breakpoints[seg.start - (clid << CACHELINE_LSH)] = true;
@@ -320,8 +319,12 @@ struct Graph {
         return total_rw;
     }
 
+    bool operator<(const Graph &rhs) const {
+        return clid < rhs.clid;
+    }
+
     friend ostream &operator<<(ostream &os, const Graph &g) {
-        os << ">>>" << g.estm_fs << "<<<\n";
+        os << ">>>0x" << hex << g.clid << dec << '(' << g.estm_fs << ")<<<\n";
         for (const auto &grp: g.groups)
             os << grp << '\n';
         os << '\n';
@@ -397,6 +400,7 @@ int main(int argc, char *argv[]) {
 
     size_t small_n = remove_erase_count_if(graphs, [](const Graph &g) { return g.estm_fs < 20; });
 
+    sort(graphs.begin(), graphs.end());
     print_final(path, graphs);
     // print_malloc(path, graphs);
 
