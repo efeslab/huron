@@ -12,17 +12,29 @@ const size_t LOG_SIZE = 1 << 16;
 struct LocRecord {
     uintptr_t addr;
     uint16_t func_id, inst_id, size;
+    bool is_heap;
+    uint32_t m_id, m_offset;
+
+    LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size, MallocIdSize &info) :
+            addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size),
+            is_heap(true), m_id((uint32_t) info.id), m_offset((uint32_t) info.size) {}
 
     LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size) :
-            addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size) {}
+            addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size),
+            is_heap(false), m_id(), m_offset() {}
 
     LocRecord() = default;
 
     void dump(FILE *fd, int thread_fd, unsigned int r, unsigned int w) const {
-        fprintf(fd, "%d,%p,%u,%u,%u,%u,%u\n", thread_fd, (void *) addr, func_id, inst_id, size, r, w);
+        if (is_heap)
+            fprintf(fd, "%d,%p,%u,%u,%u,%u,%u,%u,%u\n",
+                thread_fd, (void *) addr, m_id, m_offset, func_id, inst_id, size, r, w);
+        else
+            fprintf(fd, "%d,%p,-1,-1,%u,%u,%u,%u,%u\n",
+                    thread_fd, (void *) addr, func_id, inst_id, size, r, w);
     }
 
-    bool operator == (const LocRecord &rhs) const {
+    bool operator==(const LocRecord &rhs) const {
         return (
                 addr == rhs.addr &&
                 func_id == rhs.func_id &&
@@ -48,6 +60,9 @@ namespace std {
             hash_combine(seed, k.func_id);
             hash_combine(seed, k.inst_id);
             hash_combine(seed, k.size);
+            hash_combine(seed, k.is_heap);
+            hash_combine(seed, k.m_id);
+            hash_combine(seed, k.m_offset);
             return seed;
         }
     };

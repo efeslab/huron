@@ -55,16 +55,18 @@ public:
         return heap.contain(addr);
     }
 
-    MallocIdSize find_id_offset(uintptr_t addr) {
+    bool find_id_offset(uintptr_t addr, MallocIdSize &id_offset) {
         // Find the first starting address greater than `addr`, then it--
         // to get where `addr` falls in.
         auto it = data_alive.upper_bound(addr);
         if (it != data_alive.begin()) {
             it--;
-            if (it->first + it->second.size > addr)
-                return MallocIdSize(it->second.id, addr - it->first);
+            if (it->first + it->second.size > addr) {
+                id_offset = MallocIdSize(it->second.id, addr - it->first);
+                return true;
+            }
         }
-        throw std::invalid_argument("");
+        return false;
     }
 
     ~MallocInfo() {

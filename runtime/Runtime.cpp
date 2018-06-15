@@ -189,7 +189,15 @@ inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     if (!malloc_sizes.contain(addr) && (addr < globalStart || addr >= globalEnd))
         return;
     MallocHookDeactivator deactiv;
-    LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+    MallocIdSize id_offset;
+    bool is_heap = malloc_sizes.find_id_offset(addr, id_offset);
+    LocRecord rec{};
+    if (is_heap) {
+        rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, id_offset);
+    }
+    else {
+        rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+    }
     deactiv.get_current()->log_load_store(rec, is_write);
 }
 
