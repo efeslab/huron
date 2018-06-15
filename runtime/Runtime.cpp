@@ -171,27 +171,29 @@ void my_free_hook(void *ptr) {
 }
 
 void free(void *ptr) {
-    if (current && current->all_hooks_active)
-        return my_free_hook(ptr);
-    return __libc_free(ptr);
+    if (current && current->all_hooks_active) {
+        my_free_hook(ptr);
+        return;
+    }
+    __libc_free(ptr);
 }
 
 inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                           size_t size, bool is_write) {
-    // Quickly return if even not in the range.
-    if (!malloc_sizes.contain(addr) && (addr < globalStart || addr >= globalEnd))
-        return;
-    MallocHookDeactivator deactiv;
-    MallocIdSize id_offset;
-    bool is_heap = malloc_sizes.find_id_offset(addr, id_offset);
-    LocRecord rec{};
-    if (is_heap) {
-        rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, id_offset);
+    // If on heap:
+    if (malloc_sizes.contain(addr)) {
+        MallocHookDeactivator deactiv;
+        MallocIdSize id_offset;
+        bool is_recorded = malloc_sizes.find_id_offset(addr, id_offset);
+        if (is_recorded) {
+            LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size, id_offset);
+            deactiv.get_current()->log_load_store(rec, is_write);
+        }
+    } else if (addr >= globalStart && addr < globalEnd) { // If on global:
+        MallocHookDeactivator deactiv;
+        LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+        deactiv.get_current()->log_load_store(rec, is_write);
     }
-    else {
-        rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
-    }
-    deactiv.get_current()->log_load_store(rec, is_write);
 }
 
 // Intercept the pthread_create function.

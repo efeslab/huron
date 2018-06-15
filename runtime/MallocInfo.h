@@ -8,6 +8,7 @@
 #include <map>
 #include <sstream>
 #include <vector>
+#include <shared_mutex>
 #include "Segment.h"
 
 struct MallocIdSize {
@@ -20,12 +21,13 @@ class MallocInfo {
     // This is an (ordered) map because we need to query lower bound for incoming access addresses.
     std::map<uintptr_t, MallocIdSize> data_alive;
     std::vector<std::pair<uintptr_t, size_t>> data_total;
+    std::shared_timed_mutex mutex;
     AddrSeg heap;
     FILE *file;
 public:
     static const size_t nfound = ~0LU;
 
-    MallocInfo(): heap(~0LU, 0) {
+    MallocInfo(): mutex(), heap(~0LU, 0) {
         file = fopen("mallocIds.csv", "w");
     }
 
@@ -36,12 +38,15 @@ public:
 
     void insert(uintptr_t start, size_t size) {
         size_t id = data_total.size();
+        mutex.lock();
         data_alive[start] = MallocIdSize(id, size);
+        mutex.unlock();
         data_total.emplace_back(start, size);
         heap.insert(AddrSeg(start, start + size));
     }
 
     bool erase(uintptr_t addr) {
+        std::unique_lock<std::shared_timed_mutex> ul(mutex);
         auto it = data_alive.find(addr);
         if (it == data_alive.end())
             return false;
@@ -58,6 +63,7 @@ public:
     bool find_id_offset(uintptr_t addr, MallocIdSize &id_offset) {
         // Find the first starting address greater than `addr`, then it--
         // to get where `addr` falls in.
+        std::shared_lock<std::shared_timed_mutex> ul(mutex);
         auto it = data_alive.upper_bound(addr);
         if (it != data_alive.begin()) {
             it--;
