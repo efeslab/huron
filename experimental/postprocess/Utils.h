@@ -126,11 +126,20 @@ struct CSVParser {
 
 
 template <typename T>
-inline T to_integral(const string_view &str) {
+inline T to_unsigned(const string_view &str) {
     T val = 0;
     for (char i: str)
         val = val * 10 + (i - '0');
     return val;
+}
+
+template <typename T>
+inline T to_signed(const string_view &str) {
+    T val = 0;
+    bool negative = str.front() == '-';
+    for (size_t i = (negative ? 1 : 0); i < str.size(); i++)
+        val = val * 10 + (str[i] - '0');
+    return (negative ? -val : val);
 }
 
 size_t to_address(const string_view &str) {
