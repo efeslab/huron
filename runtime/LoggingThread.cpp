@@ -1,15 +1,6 @@
 #include "LoggingThread.h"
 
 void Thread::flush_log() {
-    if (!this->buffer_f) {
-        auto filename = get_filename();
-        this->buffer_f = fopen(filename.c_str(), "a");
-        if (!this->buffer_f) {
-            fprintf(stderr, "Cannot open file!!\n");//TODO: there is a problem here with main-0 thread
-            //exit(1);
-            return;
-        }
-    }
     for (const auto &rw_n: this->outputBuf)
         // if (rw_n.second.second)  // if is not read-only
         rw_n.first.dump(this->buffer_f, this->index, rw_n.second.first, rw_n.second.second);
@@ -25,8 +16,7 @@ void Thread::log_load_store(const LocRecord &rw, bool is_write) {
             it->second.second++;
         else
             it->second.first++;
-    }
-    else {
+    } else {
         auto pair = is_write ? std::make_pair(0, 1) : std::make_pair(1, 0);
         this->outputBuf.emplace(rw, pair);
     }
@@ -39,4 +29,21 @@ std::string Thread::get_filename() {
 void Thread::close_buffer() {
     if (this->buffer_f)
         fclose(this->buffer_f);
+}
+
+void Thread::open_buffer() {
+    auto filename = get_filename();
+    this->buffer_f = fopen(filename.c_str(), "a");
+    if (!this->buffer_f) {
+        fprintf(stderr, "Cannot open file!!\n");  // TODO: there is a problem here with main-0 thread
+        //exit(1);
+        return;
+    }
+}
+
+Thread::Thread(int _index, threadFunction _startRoutine, void *_startArg) :
+        buffer_f(nullptr), startRoutine(_startRoutine), startArg(_startArg),
+        index(_index), all_hooks_active(false) {
+    this->outputBuf.reserve(LOG_SIZE);
+    this->open_buffer();
 }

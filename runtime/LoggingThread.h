@@ -59,7 +59,7 @@ struct Thread {
     // File handle
     FILE *buffer_f;
     // Results of pthread_self
-    pthread_t self;
+    // pthread_t self;
     // The following is the parameter about starting function.
     threadFunction *startRoutine;
     void *startArg;
@@ -68,18 +68,18 @@ struct Thread {
     // void * stackTop;
     // index of this thread object.
     int index;
-    // True: malloc will call our malloc_hook.
-    bool malloc_hook_active;
+    // True: malloc & pthread_create are our version.
+    bool all_hooks_active;
 
-    Thread(): buffer_f(nullptr), startRoutine(nullptr), startArg(nullptr), malloc_hook_active(false) {
-        this->outputBuf.reserve(LOG_SIZE);
-    }
+    Thread(int _index, threadFunction _startRoutine, void *_startArg);
 
     void flush_log();
 
     void log_load_store(const LocRecord &rw, bool is_write);
 
     std::string get_filename();
+
+    void open_buffer();
 
     void close_buffer();
 };
