@@ -94,32 +94,28 @@ public:
         return result;
     }
 
-    void flush_all() {
-        assert(current->index == 0);
-        // Remember to CLOSE all the files to apply changes.
-        for (auto &th: _threads) {
-            th.flush_log();
-            th.close_buffer();
-        }
-    }
-
-//    void flush_all_concat_to(const std::string &output_name) {
+//    void flush_all() {
 //        assert(current->index == 0);
-//        // Should be run with all other threads finished.
-//        while (isMultithreading);
-//        // Then we first flush ourselves,
-//        _threads[0].flush_log();
-//        // and append files together. Remember to CLOSE all the files to apply changes.
-//        for (int i = 0; i < _threadIndex; i++) {
-//            _threads[i].close_buffer();
-//            std::string cat_cmd = "cat " + _threads[i].get_filename() + " >> " + output_name;
-//            system(cat_cmd.c_str());
-//            std::string rm_cmd = "rm " + _threads[i].get_filename();
-//            system(rm_cmd.c_str());
+//        // Remember to CLOSE all the files to apply changes.
+//        for (auto &th: _threads) {
+//            th.flush_log();
+//            th.stop_logging();
 //        }
-//        std::string wc_out_cmd = "wc -l " + output_name;
-//        system(wc_out_cmd.c_str());
 //    }
+
+    void flush_all_concat_to(const std::string &output_name) {
+        assert(current->index == 0);
+        // Ask all threads to stop writing, and append files together.
+        for (auto &th: _threads) {
+            th.stop_logging();
+            std::string cat_cmd = "cat " + th.get_filename() + " >> " + output_name;
+            system(cat_cmd.c_str());
+            std::string rm_cmd = "rm " + th.get_filename();
+            system(rm_cmd.c_str());
+        }
+        std::string wc_out_cmd = "wc -l " + output_name;
+        system(wc_out_cmd.c_str());
+    }
 
 private:
     void removeThread() {

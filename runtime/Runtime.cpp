@@ -70,7 +70,7 @@ void finalizer(void) {
 #ifdef DEBUG
     printf("Finalizing...\n");
 #endif
-    xthread::getInstance().flush_all();
+    xthread::getInstance().flush_all_concat_to("record.log");
     malloc_sizes.dump("malloc.txt");
     // xthread::getInstance().flush_all_concat_to("record.log");
 }

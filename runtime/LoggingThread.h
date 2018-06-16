@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include <unordered_map>
+#include <atomic>
 
 typedef void *threadFunction(void *);
 
@@ -78,9 +79,8 @@ struct Thread {
     // The following is the parameter about starting function.
     threadFunction *startRoutine;
     void *startArg;
-    // We used this to record the stack range
-    // void * stackBottom;
-    // void * stackTop;
+    // True: thread is writing to its buffer.
+    std::atomic<bool> *writing;
     // index of this thread object.
     int index;
     // True: malloc & pthread_create are our version.
@@ -96,7 +96,7 @@ struct Thread {
 
     void open_buffer();
 
-    void close_buffer();
+    void stop_logging();
 };
 
 extern __thread Thread *current;

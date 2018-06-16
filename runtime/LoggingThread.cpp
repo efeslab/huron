@@ -8,6 +8,8 @@ void Thread::flush_log() {
 }
 
 void Thread::log_load_store(const LocRecord &rw, bool is_write) {
+    if (!writing)
+        return;
     if (this->outputBuf.size() == LOG_SIZE)
         this->flush_log();
     auto it = this->outputBuf.find(rw);
@@ -26,7 +28,9 @@ std::string Thread::get_filename() {
     return "__record__" + std::to_string(this->index) + ".log";
 }
 
-void Thread::close_buffer() {
+void Thread::stop_logging() {
+    *writing = false;
+    flush_log();
     if (this->buffer_f)
         fclose(this->buffer_f);
 }
@@ -35,15 +39,16 @@ void Thread::open_buffer() {
     auto filename = get_filename();
     this->buffer_f = fopen(filename.c_str(), "a");
     if (!this->buffer_f) {
-        fprintf(stderr, "Cannot open file!!\n");  // TODO: there is a problem here with main-0 thread
-        //exit(1);
+        fprintf(stderr, "Cannot open file!!\n");
         return;
     }
+    *writing = true;
 }
 
 Thread::Thread(int _index, threadFunction _startRoutine, void *_startArg) :
         buffer_f(nullptr), startRoutine(_startRoutine), startArg(_startArg),
         index(_index), all_hooks_active(false) {
+    writing = new std::atomic<bool>;
     this->outputBuf.reserve(LOG_SIZE);
     this->open_buffer();
 }
