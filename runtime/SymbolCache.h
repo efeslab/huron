@@ -30,12 +30,12 @@ class SymbolCache {
     }
 
 public:
-    void insert_range(void **begin, void **end) {
+    void insert_range(const std::vector<void*> &bt) {
         std::vector<void *> not_found;
-        for (; begin != end; begin++) {
-            auto it = addresses.find(*begin);
+        for (const auto &ptr: bt) {
+            auto it = addresses.find(ptr);
             if (it == addresses.end())
-                not_found.push_back(*begin);
+                not_found.push_back(ptr);
         }
         char **string_bufs = backtrace_symbols(not_found.data(), (int) not_found.size());
         for (size_t i = 0; i < not_found.size(); i++)
@@ -43,10 +43,10 @@ public:
         free(string_bufs);
     }
 
-    void backtrace_symbols_fd(void **begin, void **end, FILE *file) {
-        insert_range(begin, end);
-        for (; begin != end; begin++)
-            fprintf(file, "%s\n", addresses[*begin].c_str());
+    void backtrace_symbols_fd(const std::vector<void*> &bt, FILE *file) {
+        insert_range(bt);
+        for (const auto &ptr: bt)
+            fprintf(file, "%s\n", addresses[ptr].c_str());
     }
 };
 

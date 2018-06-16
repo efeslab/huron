@@ -71,6 +71,7 @@ void finalizer(void) {
     printf("Finalizing...\n");
 #endif
     xthread::getInstance().flush_all();
+    malloc_sizes.dump("malloc.txt");
     // xthread::getInstance().flush_all_concat_to("record.log");
 }
 
@@ -170,11 +171,11 @@ inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
     // If on heap:
     if (malloc_sizes.contain(addr)) {
         HookDeactivator deactiv;
-        MallocIdSize id_offset;
-        bool is_recorded = malloc_sizes.find_id_offset(addr, id_offset);
+        size_t m_id, m_offset;
+        bool is_recorded = malloc_sizes.find_id_offset(addr, m_id, m_offset);
         if (is_recorded) {
             LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size,
-                                      (uint32_t) id_offset.id, (uint32_t) id_offset.size);
+                                      (uint32_t) m_id, (uint32_t) m_offset);
             deactiv.get_current()->log_load_store(rec, is_write);
         }
     } else if (addr >= globalStart && addr < globalEnd) { // If on global:
