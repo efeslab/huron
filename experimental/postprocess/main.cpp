@@ -187,8 +187,8 @@ struct AddrRecord {
     friend ostream &operator<<(ostream &os, const AddrRecord &rec) {
         os << '(' << hex << "0x" << rec.start << ", 0x" << rec.end << ')' << dec << ": ";
         print_map(os, rec.thread_rw);
-//        os << "  ";
-//        print_map(os, rec.pc_rw);
+        os << "  ";
+        print_map(os, rec.pc_rw);
         return os;
     }
 
@@ -200,13 +200,6 @@ struct AddrRecord {
         for (const auto &p: thread_rw)
             threads[p.first] = true;
         return threads;
-    }
-
-    bool is_read_only() const {
-        for (const auto &p: thread_rw)
-            if (p.second.w != 0)
-                return false;
-        return true;
     }
 
     static RW get_total_rw(const vector<AddrRecord> &records) {
@@ -307,7 +300,6 @@ struct Graph {
             grouping_map[rec.get_thread_ids()].push_back(move(rec));
         for (auto &p: grouping_map)
             groups.emplace_back(move(p));
-        // sort(groups.begin(), groups.end(), []() )
     }
 
     size_t estm_false_sharing() const {
@@ -406,23 +398,24 @@ int main(int argc, char *argv[]) {
     ofstream graphs_stream(insert_suffix(path, "_output"));
     ofstream stats_stream(insert_suffix(path, "_stats"));
     ofstream stats2_stream(insert_suffix(path, "_stats2"));
-    set<pair<size_t, size_t>> fs_cl_ordering;
+    map<size_t, size_t> fs_cl_ordering;
 
     auto groups = get_groups_from_log(file);
     for (auto &grp: groups) {
         auto graphs = calc_graphs(stats_stream, grp.first, grp.second);
         if (!graphs.empty()) {
             sort(graphs.begin(), graphs.end());
-            graphs_stream << "=================" << grp.first << "================\n";
-            for (const Graph &g: graphs) {
+            size_t malloc_fs = accumulate(graphs.begin(), graphs.end(), 0ul,
+                                          [](size_t rhs, const Graph &lhs) { return rhs + lhs.estm_fs; });
+            graphs_stream << "=================" << grp.first << "(" << malloc_fs << ")================\n";
+            fs_cl_ordering.emplace(malloc_fs, grp.first);
+            for (const Graph &g: graphs)
                 graphs_stream << g;
-                fs_cl_ordering.emplace(g.estm_fs, g.clid);
-            }
         }
     }
 
     for (auto it = fs_cl_ordering.rbegin(); it != fs_cl_ordering.rend(); it++)
-        stats2_stream << '#' << it->first << '@' << hex << it->second << dec << '\n';
+        stats2_stream << '#' << it->first << '@' << it->second << '\n';
 
     cout << "Format in file " << insert_suffix(path, "_stats") << ":\n"
          << "malloc_id, # of cachelines in total, # of single threaded cachelines, "
