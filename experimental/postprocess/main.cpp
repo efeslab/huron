@@ -126,16 +126,38 @@ struct AllMallocs {
 };
 
 struct Record {
-    size_t addr, cacheline;
+    size_t addr;
     int m_id, m_offset;
     uint16_t thread, size;
     PC pc;
     RW rw;
 
-    Record() : addr(0), cacheline(0), m_id(0), m_offset(0), thread(0), size(0), pc(0, 0), rw(0, 0) {}
+    Record() : addr(0), m_id(0), m_offset(0), thread(0), size(0), pc(0, 0), rw(0, 0) {}
 
     Segment get_addr_range() const {
         return {addr, addr + size};
+    }
+
+    bool cross_cacheline() const {
+        return addr >> CACHELINE_BIT != (addr + size - 1) >> CACHELINE_BIT;
+    }
+
+    size_t cacheline() const {
+        return addr >> CACHELINE_BIT;
+    }
+
+    static vector<Record> split_at_cacheline(Record rec) {
+        vector<Record> records;
+        while (rec.cross_cacheline()) {
+            Record rec1 = rec;
+            size_t l = rec.addr, cl_bound = ((l >> CACHELINE_BIT) + 1) << CACHELINE_BIT;
+            rec1.size = (uint16_t) (cl_bound - l);
+            rec.addr = cl_bound;
+            rec.size -= rec1.size;
+            records.push_back(rec1);
+        }
+        records.push_back(rec);
+        return records;
     }
 
     friend istream &operator>>(istream &is, Record &rec) {
@@ -147,7 +169,6 @@ struct Record {
         const auto &fields = csv.read_csv_line(line);
         rec.thread = to_unsigned<uint16_t>(fields[0]);
         rec.addr = to_address(fields[1]);
-        rec.cacheline = rec.addr / CACHELINE;
         rec.m_id = to_signed<int>(fields[2]);
         rec.m_offset = to_signed<int>(fields[3]);
         rec.pc.func = to_unsigned<uint16_t>(fields[4]);
@@ -171,10 +192,9 @@ struct AddrRecord {
             thread_rw(8), pc_rw(20), clid(_clid) {
         malloc_id = records_begin->m_id;
         if (malloc_id != -1) {
-            start = (size_t)records_begin->m_offset;
+            start = (size_t) records_begin->m_offset;
             end = start + _end - _start;
-        }
-        else {
+        } else {
             start = _start;
             end = _end;
         }
@@ -224,17 +244,18 @@ struct AddrRecord {
         // We expect thousand/million records on each cache line, so an O(n) algorithm here:
         // Each record can be seen as a line segment[addr, addr + size)
         // First, get all _unique_ start and end points; they are breakpoints.
-        bool breakpoints[CACHELINE];
-        memset(breakpoints, 0, CACHELINE);
+        bool breakpoints[CACHELINE + 1];
+        memset(breakpoints, 0, CACHELINE + 1);
         for (const Record &rec: records) {
             auto seg = rec.get_addr_range();
-            breakpoints[seg.start - (clid << CACHELINE_LSH)] = true;
-            breakpoints[seg.end - (clid << CACHELINE_LSH)] = true;
+            size_t l = seg.start - (clid << CACHELINE_BIT), r = seg.end - (clid << CACHELINE_BIT);
+            assert(l >= 0 && l <= CACHELINE && r >= 0 && r <= CACHELINE && l < r);
+            breakpoints[l] = breakpoints[r] = true;
         }
         vector<size_t> breakpoints_v;
         for (size_t i = 0; i < CACHELINE; i++)
             if (breakpoints[i])
-                breakpoints_v.push_back(i + (clid << CACHELINE_LSH));
+                breakpoints_v.push_back(i + (clid << CACHELINE_BIT));
 
         vector<AddrRecord> addr_records;
         addr_records.reserve(breakpoints_v.size());
@@ -256,6 +277,7 @@ struct AddrRecord {
             addr_records.emplace_back(clid, l, r, this_range_records.begin(), this_range_records.end());
             // The number of breakpoints will not exceed CACHELINE_SIZE, so this is actually O(n).
         }
+        addr_records.shrink_to_fit();
         return addr_records;
     }
 };
@@ -332,8 +354,13 @@ struct Graph {
 map<int, map<size_t, vector<Record>>> get_groups_from_log(ifstream &file) {
     map<int, map<size_t, vector<Record>>> map;
     Record next;
-    while (file >> next)
-        map[next.m_id][next.cacheline].push_back(next);
+    while (file >> next) {
+        if (next.cross_cacheline())
+            for (auto splitted_rec: Record::split_at_cacheline(next))
+                map[next.m_id][splitted_rec.cacheline()].push_back(move(splitted_rec));
+        else
+            map[next.m_id][next.cacheline()].push_back(next);
+    }
     return map;
 }
 
@@ -401,7 +428,11 @@ int main(int argc, char *argv[]) {
     map<size_t, size_t> fs_cl_ordering;
 
     auto groups = get_groups_from_log(file);
+    size_t i = 0;
     for (auto &grp: groups) {
+        i++;
+        if (!(i % 1000))
+            cout << i << '/' << groups.size() << endl;
         auto graphs = calc_graphs(stats_stream, grp.first, grp.second);
         if (!graphs.empty()) {
             sort(graphs.begin(), graphs.end());
