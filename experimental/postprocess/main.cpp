@@ -62,10 +62,22 @@ struct Segment {
 
     Segment(size_t _start, size_t _end) : start(_start), end(_end) {}
 
-    bool segment_overlap(const Segment &rhs) {
-        return (start < rhs.end && end > rhs.start) || (rhs.start < end && rhs.end > start);
+    bool operator==(const Segment &rhs) const {
+        return start == rhs.start && end == rhs.end;
     }
 };
+
+namespace std {
+    template<>
+    struct hash<Segment> {
+        std::size_t operator()(Segment const &seg) const {
+            std::size_t res = 0;
+            hash_combine(res, seg.start);
+            hash_combine(res, seg.end);
+            return res;
+        }
+    };
+}
 
 struct Record {
     size_t addr;
@@ -75,33 +87,6 @@ struct Record {
     RW rw;
 
     Record() : addr(0), m_id(0), m_offset(0), thread(0), size(0), pc(0, 0), rw(0, 0) {}
-
-    Segment get_addr_range() const {
-        return {addr, addr + size};
-    }
-
-    bool cross_cacheline() const {
-        return addr >> CACHELINE_BIT != (addr + size - 1) >> CACHELINE_BIT;
-    }
-
-    size_t cacheline() const {
-        return addr >> CACHELINE_BIT;
-    }
-
-    static vector<Record> split_at_cacheline(Record rec) {
-        vector<Record> records;
-        while (rec.cross_cacheline()) {
-            Record rec1 = rec;
-            size_t l = rec.addr, cl_bound = ((l >> CACHELINE_BIT) + 1) << CACHELINE_BIT, shift = cl_bound - l;
-            rec1.size = (uint16_t) shift;
-            rec.addr = cl_bound;
-            rec.size -= shift;
-            rec.m_offset += shift;
-            records.push_back(rec1);
-        }
-        records.push_back(rec);
-        return records;
-    }
 
     friend istream &operator>>(istream &is, Record &rec) {
         static CSVParser csv(9);
@@ -127,28 +112,38 @@ struct Record {
 struct AddrRecord {
     unordered_map<uint32_t, RW> thread_rw;
     unordered_map<PC, RW> pc_rw;
-    size_t clid, start, end;
+    size_t start, end;
+    size_t malloc_start;
     int malloc_id;
 
-    AddrRecord(size_t _clid, size_t _start, size_t _end,
-               vector<Record>::iterator records_begin, vector<Record>::iterator records_end) :
-            clid(_clid) {
-        malloc_id = records_begin->m_id;
-        if (malloc_id != -1) {
-            start = _start - (records_begin->addr - records_begin->m_offset);
-            end = start + _end - _start;
-        } else {
-            start = _start;
-            end = _end;
-        }
-        for (auto it = records_begin; it != records_end; it++) {
-            thread_rw[it->thread] += it->rw;
-            pc_rw[it->pc] += it->rw;
+    AddrRecord(size_t _start, size_t _end, int m_id, int m_offset, const vector<Record> &records) :
+            malloc_id(m_id) {
+        malloc_start = malloc_id == -1 ? 0 : _start - m_offset;
+        start = _start - malloc_start;
+        end = _end - malloc_start;
+        for (const auto &rec: records) {
+            thread_rw[rec.thread] += rec.rw;
+            pc_rw[rec.pc] += rec.rw;
         }
     }
 
+    pair<size_t, size_t> cachelines() const {
+        size_t addr_start = malloc_start + start, addr_end_incl = malloc_start + end - 1;
+        size_t start_cl = addr_start >> CACHELINE_BIT, end_cl = addr_end_incl >> CACHELINE_BIT;
+        return make_pair(start_cl, end_cl);
+    }
+
     friend ostream &operator<<(ostream &os, const AddrRecord &rec) {
-        os << '(' << hex << "0x" << rec.start << ", 0x" << rec.end << ')' << dec << ": ";
+        auto p = rec.cachelines();
+        size_t addr_start = rec.malloc_start + rec.start, addr_end = rec.malloc_start + rec.end;
+        size_t l = addr_start - (p.first << CACHELINE_BIT), r = addr_end - (p.second << CACHELINE_BIT);
+        os << hex;
+        if (p.first != p.second)
+            os << "(" << p.first << "+0x" << l << ", " << p.second << "+0x" << r << ");";
+        else
+            os << "(" << "0x" << l << ", " << "0x" << r << ");";
+        os << "m(" << "0x" << rec.start << ", 0x" << rec.end << ')' << ": ";
+        os << dec;
         print_map(os, rec.thread_rw);
         os << "  ";
         print_map(os, rec.pc_rw);
@@ -181,47 +176,6 @@ struct AddrRecord {
                 if (exclude_threads.size() <= p.first || !exclude_threads[p.first])
                     ret += p.second;
         return ret;
-    }
-
-    static vector<AddrRecord> from_cacheline_records(size_t clid, const vector<Record> &records) {
-        // We expect thousand/million records on each cache line, so an O(n) algorithm here:
-        // Each record can be seen as a line segment[addr, addr + size)
-        // First, get all _unique_ start and end points; they are breakpoints.
-        bool breakpoints[CACHELINE + 1];
-        memset(breakpoints, 0, CACHELINE + 1);
-        for (const Record &rec: records) {
-            auto seg = rec.get_addr_range();
-            size_t l = seg.start - (clid << CACHELINE_BIT), r = seg.end - (clid << CACHELINE_BIT);
-            assert(l >= 0 && l <= CACHELINE && r >= 0 && r <= CACHELINE && l < r);
-            breakpoints[l] = breakpoints[r] = true;
-        }
-        vector<size_t> breakpoints_v;
-        for (size_t i = 0; i < CACHELINE; i++)
-            if (breakpoints[i])
-                breakpoints_v.push_back(i + (clid << CACHELINE_BIT));
-
-        vector<AddrRecord> addr_records;
-        addr_records.reserve(breakpoints_v.size());
-        // Then, iterate through breakpoints pairwise.
-        for (size_t i = 1; i < breakpoints_v.size(); i++) {
-            // For each pair, traverse all Records, find ones that overlap with[l, r).
-            // If a Record is exactly on[l, r), use it as is.
-            // Otherwise (the record range must be larger than[l, r)),
-            // also use it as is, but only because AddrRecord() will ignore the value
-            // in the record. This is equivalent to splitting this record into pieces.
-            vector<Record> this_range_records;
-            size_t l = breakpoints_v[i - 1], r = breakpoints_v[i];
-            for (const Record &rec: records) {
-                if (rec.get_addr_range().segment_overlap(Segment(l, r)))
-                    this_range_records.push_back(rec);
-            }
-            if (this_range_records.empty())
-                continue;
-            addr_records.emplace_back(clid, l, r, this_range_records.begin(), this_range_records.end());
-            // The number of breakpoints will not exceed CACHELINE_SIZE, so this is actually O(n).
-        }
-        addr_records.shrink_to_fit();
-        return addr_records;
     }
 };
 
@@ -294,23 +248,34 @@ struct Graph {
     }
 };
 
-map<int, map<size_t, vector<Record>>> get_groups_from_log(ifstream &file) {
-    map<int, map<size_t, vector<Record>>> map;
+map<int, map<size_t, vector<AddrRecord>>> get_groups_from_log(ifstream &file) {
+    map<int, unordered_map<Segment, vector<Record>>> bins;
+    map<int, map<size_t, vector<AddrRecord>>> ret;
     Record next;
     while (file >> next) {
-        if (next.cross_cacheline())
-            for (auto splitted_rec: Record::split_at_cacheline(next))
-                map[next.m_id][splitted_rec.cacheline()].push_back(splitted_rec);
-        else
-            map[next.m_id][next.cacheline()].push_back(next);
+        auto key = Segment(next.addr, next.addr + next.size);
+        bins[next.m_id][key].push_back(next);
     }
-    return map;
+    for (const auto &p: bins) {
+        for (const auto &p2: p.second) {
+            const Record &ref = p2.second.front();
+            size_t start = p2.first.start, end = p2.first.end;
+            int m_id = ref.m_id, m_offset = ref.m_offset;
+            AddrRecord arec(start, end, m_id, m_offset, p2.second);
+            auto cls = arec.cachelines();
+            assert(cls.first <= cls.second);
+            for (size_t i = cls.first; i <= cls.second; i++)
+                ret[m_id][i].push_back(arec);
+        }
+    }
+    return ret;
 }
 
-bool cl_single_threaded(const pair<const size_t, vector<Record>> &id_group) {
+bool cl_single_threaded(const pair<const size_t, vector<AddrRecord>> &id_group) {
     unordered_set<size_t> threads;
     for (const auto &rec: id_group.second)
-        threads.insert(rec.thread);
+        for (const auto &p: rec.thread_rw)
+            threads.insert(p.first);
     return threads.size() == 1;
 }
 
@@ -332,25 +297,20 @@ bool cl_single_threaded(const pair<const size_t, vector<Record>> &id_group) {
 
 vector<Graph> calc_graphs(ostream &stats_stream,
                           int mid,
-                          map<size_t, vector<Record>> &cl_groups,
+                          map<size_t, vector<AddrRecord>> &cl_groups,
                           size_t threshold = 100) {
     size_t n = cl_groups.size();
 
     size_t single_n = erase_count_if(cl_groups, cl_single_threaded);
 
-    unordered_map<size_t, vector<AddrRecord>> addrrec_groups;
-    for (const auto &pair: cl_groups)
-        addrrec_groups[pair.first] = AddrRecord::from_cacheline_records(pair.first, pair.second);
-    map<size_t, vector<Record>>().swap(cl_groups);
-
     vector<Graph> graphs;
-    graphs.reserve(addrrec_groups.size());
-    for (auto &pair: addrrec_groups)
+    graphs.reserve(cl_groups.size());
+    for (auto &pair: cl_groups)
         graphs.emplace_back(move(pair));
-    unordered_map<size_t, vector<AddrRecord>>().swap(addrrec_groups);
+    map<size_t, vector<AddrRecord>>().swap(cl_groups);
 
     size_t small_n = remove_erase_count_if(graphs, [threshold](const Graph &g) { return g.estm_fs < threshold; });
-    stats_stream << mid << ',' << n << ',' << single_n << ',' << small_n << ',' << graphs.size();
+    stats_stream << mid << ',' << n << ',' << single_n << ',' << small_n << ',' << graphs.size() << '\n';
     return graphs;
 }
 
@@ -365,9 +325,9 @@ int main(int argc, char *argv[]) {
         return 1;
     std::ios_base::sync_with_stdio(false);
 
-    ofstream graphs_stream(insert_suffix(path, "_output"));
-    ofstream stats_stream(insert_suffix(path, "_stats"));
-    ofstream stats2_stream(insert_suffix(path, "_stats2"));
+    ofstream graphs_stream(insert_suffix(path, "_summary"));
+    ofstream stats_stream(insert_suffix(path, "_stats_malloc"));
+    ofstream stats2_stream(insert_suffix(path, "_fs_malloc"));
     map<size_t, size_t> fs_cl_ordering;
 
     auto groups = get_groups_from_log(file);
