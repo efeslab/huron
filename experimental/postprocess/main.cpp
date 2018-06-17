@@ -132,7 +132,7 @@ struct AddrRecord {
 
     AddrRecord(size_t _clid, size_t _start, size_t _end,
                vector<Record>::iterator records_begin, vector<Record>::iterator records_end) :
-            thread_rw(8), pc_rw(20), clid(_clid) {
+            clid(_clid) {
         malloc_id = records_begin->m_id;
         if (malloc_id != -1) {
             start = _start - (records_begin->addr - records_begin->m_offset);
@@ -300,7 +300,7 @@ map<int, map<size_t, vector<Record>>> get_groups_from_log(ifstream &file) {
     while (file >> next) {
         if (next.cross_cacheline())
             for (auto splitted_rec: Record::split_at_cacheline(next))
-                map[next.m_id][splitted_rec.cacheline()].push_back(move(splitted_rec));
+                map[next.m_id][splitted_rec.cacheline()].push_back(splitted_rec);
         else
             map[next.m_id][next.cacheline()].push_back(next);
     }
