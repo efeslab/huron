@@ -147,7 +147,7 @@ size_t to_address(const string_view &str) {
         throw invalid_argument("Invalid address format");
     size_t val = 0;
     for (size_t i = 2; i < str.size(); i++)
-        val = val * 16 + (str[i] > 'a' ? str[i] - 'a' + 10 : str[i] - '0');
+        val = val * 16 + (str[i] >= 'a' ? str[i] - 'a' + 10 : str[i] - '0');
     return val;
 }
 

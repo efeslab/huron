@@ -150,10 +150,11 @@ struct Record {
         vector<Record> records;
         while (rec.cross_cacheline()) {
             Record rec1 = rec;
-            size_t l = rec.addr, cl_bound = ((l >> CACHELINE_BIT) + 1) << CACHELINE_BIT;
-            rec1.size = (uint16_t) (cl_bound - l);
+            size_t l = rec.addr, cl_bound = ((l >> CACHELINE_BIT) + 1) << CACHELINE_BIT, shift = cl_bound - l;
+            rec1.size = (uint16_t) shift;
             rec.addr = cl_bound;
-            rec.size -= rec1.size;
+            rec.size -= shift;
+            rec.m_offset += shift;
             records.push_back(rec1);
         }
         records.push_back(rec);
@@ -192,7 +193,7 @@ struct AddrRecord {
             thread_rw(8), pc_rw(20), clid(_clid) {
         malloc_id = records_begin->m_id;
         if (malloc_id != -1) {
-            start = (size_t) records_begin->m_offset;
+            start = _start - (records_begin->addr - records_begin->m_offset);
             end = start + _end - _start;
         } else {
             start = _start;
