@@ -17,6 +17,37 @@ void finalizer(void) __attribute__((destructor));
 
 void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write);
+
+void store_16bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 16, true);
+}
+void store_8bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 8, true);
+}
+void store_4bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 4, true);
+}
+void store_2bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 2, true);
+}
+void store_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 1, true);
+}
+void load_16bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 16, false);
+}
+void load_8bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 8, false);
+}
+void load_4bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 4, false);
+}
+void load_2bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 2, false);
+}
+void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
+    handle_access(addr, func_id, inst_id, 1, false);
+}
 }
 
 MallocInfo malloc_sizes;
