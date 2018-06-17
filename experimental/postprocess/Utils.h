@@ -66,19 +66,6 @@ void print_map(ostream &os, const MapT &map) {
     os << '}';
 }
 
-template<typename SetT>
-void print_set(ostream &os, const SetT &set) {
-    os << '{';
-    bool need_comma = false;
-    for (const auto &t: set) {
-        if (need_comma)
-            os << ", ";
-        os << t;
-        need_comma = true;
-    }
-    os << '}';
-}
-
 void print_bv_as_set(ostream &os, const vector<bool> &set) {
     os << '{';
     bool need_comma = false;

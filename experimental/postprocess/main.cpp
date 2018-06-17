@@ -67,64 +67,6 @@ struct Segment {
     }
 };
 
-struct MallocInfo {
-    size_t start, end;
-    uint32_t id;
-
-    explicit MallocInfo(uint32_t _id = ~0U, size_t _start = ~0UL, size_t _end = ~0UL) :
-            start(_start), end(_end), id(_id) {}
-
-    static MallocInfo failed_value() {
-        return MallocInfo();
-    }
-
-    bool failed() const {
-        return id == ~0U;
-    }
-
-    bool operator<(const MallocInfo &rhs) const {
-        return start < rhs.start;
-    }
-};
-
-struct AllMallocs {
-    vector<MallocInfo> mallocs;
-
-    explicit AllMallocs(const string &path) {
-        read_from(path);
-    }
-
-    void read_from(const string &path) {
-        static CSVParser csv(3);
-        ifstream malloc(path);
-        string line;
-        while (getline(malloc, line)) {
-            const auto &fields = csv.read_csv_line(line);
-            size_t id = to_unsigned<size_t>(fields[0]),
-                    start = to_address(fields[1]),
-                    size = to_unsigned<size_t>(fields[2]),
-                    end = start + size;
-            mallocs.emplace_back(id, start, end);
-        }
-        sort(mallocs.begin(), mallocs.end());
-    }
-
-    MallocInfo get_malloc_info(size_t addr) const {
-        auto it = upper_bound(mallocs.begin(), mallocs.end(), MallocInfo(0, addr, 0));
-        if (it == mallocs.begin())
-            return MallocInfo::failed_value();
-        it--;
-        if (it->start <= addr && it->end > addr)
-            return *it;
-        else
-            return MallocInfo::failed_value();
-    }
-
-    size_t size() const {
-        return mallocs.size();
-    }
-};
-
 struct Record {
     size_t addr;
     int m_id, m_offset;
