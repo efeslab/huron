@@ -64,7 +64,7 @@ struct Instrumenter : public FunctionPass {
                                      Value *size, Instruction *insertBefore,
                                      bool isWrite);
     Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
-                                      bool isWrite, size_t accessSizeArrayIndex,
+                                      bool isWrite, uint32_t accessSizeArrayIndex,
                                       unsigned long funcId,
                                       unsigned long instCounter);
 
@@ -239,22 +239,22 @@ void Instrumenter::instrumentMemoryAccess(Instruction *ins,
     Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
 
     assert(OrigTy->isSized());
-    uint32_t typeSize = TD->getTypeStoreSizeInBits(OrigTy);
+    uint32_t typeSizeBits = TD->getTypeStoreSizeInBits(OrigTy);
 
-    if (typeSize != 8 && typeSize != 16 && typeSize != 32 && typeSize != 64 &&
-        typeSize != 128) {
-        errs() << "ignored typesize is " << typeSize << "at: ";
-        return;
-    }
+    // if (typeSizeBits != 8 && typeSizeBits != 16 && typeSizeBits != 32 && typeSizeBits != 64 &&
+    //     typeSizeBits != 128) {
+    //     errs() << "ignored typesize is " << typeSizeBits << "at: ";
+    //     return;
+    // }
 
     IRBuilder<> IRB(ins);
-    instrumentAddress(ins, IRB, addr, typeSize, isWrite, funcId, instCounter);
+    instrumentAddress(ins, IRB, addr, typeSizeBits >> 3, isWrite, funcId, instCounter);
 }
 
 // General function call before some given instruction
 Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
                                                 Value *addr, bool isWrite,
-                                                size_t typeSize,
+                                                uint32_t typeBytes,
                                                 unsigned long funcId,
                                                 unsigned long instCounter) {
     IRBuilder<> IRB(insertBefore);
@@ -263,7 +263,7 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
     arguments.push_back(addr);
     arguments.push_back(ConstantInt::get(int64Type, funcId));
     arguments.push_back(ConstantInt::get(int64Type, instCounter));
-    arguments.push_back(ConstantInt::get(int64Type, typeSize));
+    arguments.push_back(ConstantInt::get(int64Type, typeBytes));
     arguments.push_back(ConstantInt::get(boolType, isWrite));
 
     CallInst *Call = IRB.CreateCall(accessCallback, ArrayRef<Value *>(arguments));
@@ -277,7 +277,7 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
 }
 
 void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
-                                     Value *addr, uint32_t typeSize,
+                                     Value *addr, uint32_t typeBytes,
                                      bool isWrite, unsigned long funcId,
                                      unsigned long instCounter) {
 
@@ -285,11 +285,11 @@ void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
 
     dbgs() << "Generated function call: " 
            << (isWrite ? "store" : "load")
-           << " size = " << typeSize
-           << "funcId, instId = " << funcId << ", " << instCounter << "\n";
+           << " size = " << typeBytes
+           << " funcId, instId = " << funcId << ", " << instCounter << "\n";
 
     // Insert the callback function here.
-    insertAccessCallback(origIns, actualAddr, isWrite, typeSize,
+    insertAccessCallback(origIns, actualAddr, isWrite, typeBytes,
                          funcId, instCounter);
 }
 
