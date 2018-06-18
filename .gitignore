@@ -16,4 +16,6 @@ cmake-build-release/
 *.o
 *.bc
 tensor
+!tensor/
 false
+!false/
