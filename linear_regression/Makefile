@@ -54,7 +54,7 @@ endif
 
 PATH_OUT = ./$(OSTYPE)/
 
-CFLAGS = -Wall $(ARCH) -g -O1
+CFLAGS = -Wall $(ARCH) -g -O1 -D_GNU_SOURCE
 LIBS = -lm -lpthread -lrt # -lcpc
 
 L_REG_OBJS = linear_regression.o

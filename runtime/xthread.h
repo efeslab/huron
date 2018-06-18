@@ -162,7 +162,7 @@ public:
 
     void flush_all_concat_to(const std::string &output_name) {
         // Should be run with all other threads finished.
-        assert(!isMultithreading);
+        //assert(!isMultithreading);
         // Then we first flush ourselves,
         _threads[0].flush_log();
         // and append files together. Remember to CLOSE all the files to apply changes.
@@ -175,8 +175,8 @@ public:
             if (system(rm_cmd.c_str()))
                 throw std::system_error();
         }
-        std::string wc_out_cmd = "wc -l " + output_name;
-        system(wc_out_cmd.c_str());
+        // std::string wc_out_cmd = "wc -l " + output_name;
+        // system(wc_out_cmd.c_str());
     }
 
 private:
