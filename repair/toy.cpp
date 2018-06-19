@@ -38,5 +38,9 @@ int main(void)
   {
     pthread_join(threads[i], NULL);
   }
+  /*for(int i =0; i < TOTAL; i++)
+  {
+    printf("%d\n",dynMemory[i]);
+  }*/
   return 0;
 }

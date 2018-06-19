@@ -52,7 +52,7 @@ int main(void)
     }
   }
   fp = fopen("location.txt", "w");
-  fprintf(fp,"%d\n%d\n", mallocId,pcSize);
+  //fprintf(fp,"%d\n%d\n", mallocId,pcSize);
   for(int i = 0; i < pcSize; i++)
   {
     fprintf(fp,"%d %d\n",pcFunctions[i], pcIndices[i]);
