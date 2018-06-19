@@ -40,6 +40,7 @@
 #include <strings.h>
 
 #ifdef _LINUX_
+#define _GNU_SOURCE
 #include <sched.h>
 #include <sys/sysinfo.h>
 #endif
@@ -126,8 +127,9 @@ struct
                               // running on the same processor or not
    int isOneQueuePerReduceTask;
    scheduler_args_t * args;   // args passed in by the user
+   //char padd[64];
    thread_info_t * tinfo;     // array of thread ids and CPU ids currently running
-   
+   //char padd2[64];
    keyvals_arr_t ** intermediate_vals; // array to send to reduce task
    int intermediate_task_alloc_len;
    keyval_arr_t * final_vals;         // array to send to merge task
@@ -165,7 +167,7 @@ typedef struct
 static inline void scheduler_init(scheduler_args_t *args);
 static inline void schedule_tasks(thread_wrapper_arg_t *);
 static inline int getNumProcs(void);
-static inline int isCpuAvailable(unsigned long, int);
+static inline int isCpuAvailable(cpu_set_t, int);
 static inline void setCpuAvailable(unsigned long *, int);
 static inline void * MALLOC(size_t);
 static inline void * CALLOC(size_t, size_t);
@@ -398,7 +400,7 @@ static inline void schedule_tasks(thread_wrapper_arg_t *th_arg)
    int pos = 0; // position of next result in the array
    pthread_mutex_t splitter_lock; // lock for splitter function
 
-   g_state.tinfo = (thread_info_t *)CALLOC(num_threads, sizeof(thread_info_t));
+   g_state.tinfo = (thread_info_t *)CALLOC(num_threads, sizeof(thread_info_t) * 64);
    CHECK_ERROR(pthread_mutex_init(&splitter_lock, NULL) != 0);   
    
    dprintf("Number of available processors = %d\n", g_state.num_procs);
@@ -414,7 +416,7 @@ static inline void schedule_tasks(thread_wrapper_arg_t *th_arg)
 
 #ifdef _LINUX_
    int max_procs = get_nprocs();
-   unsigned long cpu_set; // bit array of available processors
+   cpu_set_t cpu_set; // bit array of available processors
    // Create a thread for each availble processor to handle the split data
    CHECK_ERROR(sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == -1);
    for (thread_cnt = curr_proc = 0; 
@@ -441,13 +443,13 @@ static inline void schedule_tasks(thread_wrapper_arg_t *th_arg)
             memcpy(curr_th_arg, th_arg, sizeof(thread_wrapper_arg_t));
             curr_th_arg->cpu_id = curr_proc;
 
-            g_state.tinfo[thread_cnt].cpuid = curr_proc;
+            g_state.tinfo[thread_cnt*64].cpuid = curr_proc;
 
             //fprintf(stderr, "Starting thread %d on cpu %d\n", thread_cnt, curr_th_arg->cpu_id);
             switch (th_arg->func_type)
             {
             case MAP:
-               CHECK_ERROR(pthread_create(&g_state.tinfo[thread_cnt].tid, &attr, 
+               CHECK_ERROR(pthread_create(&g_state.tinfo[thread_cnt * 64].tid, &attr, 
                                                 map_worker, curr_th_arg) != 0);
                break;
             case REDUCE:
@@ -1156,7 +1158,7 @@ static inline int getNumProcs(void)
    int num_procs = 0;
 
 #ifdef _LINUX_
-   unsigned long cpus;
+   cpu_set_t cpus;
    int i;
    // Returns number of processors available to process (based on affinity mask)
    CHECK_ERROR(sched_getaffinity(0, sizeof(cpus), &cpus) == -1);
@@ -1186,10 +1188,10 @@ static inline int getNumProcs(void)
  *  cpu - index of cpu to check in cpu_set
  *  return 1 if available, 0 if not.
  */
-static inline int isCpuAvailable(unsigned long cpu_set, int cpu)
+static inline int isCpuAvailable(cpu_set_t cpu_set, int cpu)
 {
-   assert(cpu < sizeof(cpu_set) * 8 && cpu >= 0);
-   return ((1<<cpu) & cpu_set) != 0;
+   //assert(cpu < sizeof(cpu_set) * 8 && cpu >= 0);
+   return CPU_ISSET(cpu, &cpu_set);
 }
 
 /** setCpuAvailable()
