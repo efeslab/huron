@@ -53,6 +53,8 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 MallocInfo malloc_sizes;
 std::mutex globals_lock;
 
+std::atomic<size_t> thread0_alloc(0), total_alloc(0);
+
 void initializer(void) {
 #ifdef DEBUG
     printf("Initializing...\n");
@@ -68,6 +70,8 @@ void finalizer(void) {
 #ifdef DEBUG
     printf("Finalizing...\n");
 #endif
+    printf("Thread 0 alloc'ed %lu bytes (accumulative) out of total %lu;\n", 
+            thread0_alloc.load(), total_alloc.load());
     xthread::getInstance().flush_all_concat_to("record.log");
     malloc_sizes.dump("malloc.txt");
     // xthread::getInstance().flush_all_concat_to("record.log");
@@ -79,9 +83,11 @@ void *my_malloc_hook(size_t size) {
     // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
     // RAII deactivate malloc hook so that we can use malloc below.
     HookDeactivator deactiv;
+    total_alloc += size;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
         // Global, single-threaded
+        thread0_alloc += size;
         malloc_sizes.insert((uintptr_t) start_ptr, size);
     }
     return start_ptr;
@@ -91,8 +97,10 @@ void *my_realloc_hook(void *ptr, size_t size) {
     void *new_start_ptr = __libc_realloc(ptr, size);
     // RAII deactivate malloc hook so that we can use realloc below.
     HookDeactivator deactiv;
+    total_alloc += size;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
+        thread0_alloc += size;
         if (ptr) {
 #ifdef DEBUG
             printf("realloc(%p, %lu)\n", ptr, size);
@@ -107,6 +115,7 @@ void *my_realloc_hook(void *ptr, size_t size) {
 }
 
 int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
+    total_alloc += size;
     int code = __internal_posix_memalign(memptr, alignment, size);
     if (code)
         return code;
@@ -117,6 +126,7 @@ int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
     HookDeactivator deactiv;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
+        thread0_alloc += size;
         // Global, single-threaded
         malloc_sizes.insert((uintptr_t) *memptr, size);
     }
