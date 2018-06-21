@@ -34,10 +34,9 @@ namespace std {
 class MallocInfo {
     struct PerAddr {
         size_t id, size;
-        std::vector<void *> bt;
 
-        explicit PerAddr(size_t _id = 0, size_t _size = 0, std::vector<void *> _bt = std::vector<void *>())
-                : id(_id), size(_size), bt(std::move(_bt)) {}
+        explicit PerAddr(size_t _id = 0, size_t _size = 0)
+                : id(_id), size(_size) {}
     };
 
     struct PerBt {
@@ -77,7 +76,7 @@ public:
         int bt_size = backtrace(bt_buf, 1000);
         std::vector<void *> bt(bt_buf, bt_buf + bt_size);
         mutex.lock();
-        data_alive[start] = PerAddr(id, size, bt);
+        data_alive[start] = PerAddr(id, size);
         mutex.unlock();
         heap.insert(AddrSeg(start, start + size));
         data_total[bt].emplace_back(start, id, size);
