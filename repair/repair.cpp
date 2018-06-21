@@ -27,11 +27,12 @@ int main(void)
       fscanf(fp,"%d %d", &pcFunctions[i], &pcIndices[i]);
     }
     vector<FeatureVector *> dataset = readData(fp);
-    for(int j = 0; j < dataset.size(); j++)
+    /*for(int j = 0; j < dataset.size(); j++)
     {
       FeatureVector * current = dataset[j];
       current->print();
-    }
+    }*/
+    kmeans(2,dataset);
   }
   fclose(fp);
   /*
