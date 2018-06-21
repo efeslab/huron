@@ -189,7 +189,7 @@ public:
         os << start << ' ' << (end - start) << ' '
            << thread_rw.size() << ' ';
         for (const auto &p2: thread_rw)
-            os << p2.first << ' '; //<< ' ' << p2.second.r << ' ' << p2.second.w;
+            os << p2.first << ' ' << p2.second.r << ' ' << p2.second.w << ' ';
         os << '\n';
     }
 
