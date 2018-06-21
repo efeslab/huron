@@ -117,13 +117,8 @@ struct Record {
     }
 };
 
-struct AddrRecord {
-    unordered_map<uint32_t, RW> thread_rw;
-    unordered_map<PC, RW> pc_rw;
-    size_t start, end;
-    size_t malloc_start;
-    int malloc_id;
-
+class AddrRecord {
+public:
     AddrRecord(size_t _start, size_t _end, int m_id, int m_offset, const vector<Record> &records) :
             malloc_id(m_id) {
         malloc_start = malloc_id == -1 ? 0 : _start - m_offset;
@@ -186,12 +181,28 @@ struct AddrRecord {
         return ret;
     }
 
-    bool operator < (const AddrRecord &rhs) const {
+    bool operator<(const AddrRecord &rhs) const {
         return start < rhs.start;
     }
+
+    void emit_api_output(ostream &os) const {
+        os << start << ' ' << (end - start) << ' '
+           << thread_rw.size() << ' ';
+        for (const auto &p2: thread_rw)
+            os << p2.first << ' '; //<< ' ' << p2.second.r << ' ' << p2.second.w;
+        os << '\n';
+    }
+
+private:
+    unordered_map<uint32_t, RW> thread_rw;
+    unordered_map<PC, RW> pc_rw;
+    size_t start, end;
+    size_t malloc_start;
+    int malloc_id;
 };
 
-struct Graph {
+class Graph {
+private:
     struct GraphGroup {
         vector<bool> threads;
         vector<AddrRecord> records;
@@ -216,9 +227,7 @@ struct Graph {
         }
     };
 
-    size_t clid, estm_fs;
-    vector<AddrRecord> records;
-
+public:
     explicit Graph(pair<size_t, vector<AddrRecord>> &&_records) :
             clid(_records.first) {
         records = move(_records.second);
@@ -236,6 +245,23 @@ struct Graph {
         return groups;
     }
 
+    size_t get_n_false_sharing() const {
+        return estm_fs;
+    }
+
+    bool operator<(const Graph &rhs) const {
+        return clid < rhs.clid;
+    }
+
+    friend ostream &operator<<(ostream &os, const Graph &g) {
+        os << ">>>0x" << hex << g.clid << dec << '(' << g.estm_fs << ")<<<\n";
+        for (const auto &rec: g.records)
+            os << rec << '\n';
+        os << '\n';
+        return os;
+    }
+
+private:
     size_t estm_false_sharing() const {
         size_t total_rw = 0;
         auto groups = thread_groups(records);
@@ -251,24 +277,21 @@ struct Graph {
         return total_rw;
     }
 
-    bool operator<(const Graph &rhs) const {
-        return clid < rhs.clid;
-    }
-
-    friend ostream &operator<<(ostream &os, const Graph &g) {
-        os << ">>>0x" << hex << g.clid << dec << '(' << g.estm_fs << ")<<<\n";
-        for (const auto &rec: g.records)
-            os << rec << '\n';
-        os << '\n';
-        return os;
-    }
+    size_t clid, estm_fs;
+    vector<AddrRecord> records;
 };
 
 
-struct MallocStorageT {
-    MallocStorageT(): malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(0) {}
+class MallocStorageT {
+public:
+    MallocStorageT(const MallocStorageT &) = delete;
 
-    explicit MallocStorageT(int _m_id, const unordered_map<Segment, vector<Record>> &bucket):
+    MallocStorageT(MallocStorageT &&) = default;
+
+    MallocStorageT() : malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(0) {}
+
+    explicit MallocStorageT(int _m_id, const unordered_map<Segment, vector<Record>> &bucket,
+                            size_t graph_threshold) :
             malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(_m_id) {
         for (const auto &p: bucket) {
             const Record &ref = p.second.front();
@@ -286,36 +309,32 @@ struct MallocStorageT {
                 all_pcs.insert(rec.pc);
             }
         }
-        _immutable = input_rec;
-        for (auto &p: _immutable)
+        for (auto &p: input_rec)
             sort(p.second.begin(), p.second.end());
+        calc_graphs(graph_threshold);
     }
 
-    static bool cl_single_threaded(const pair<const size_t, vector<AddrRecord>> &id_group) {
-        unordered_set<size_t> threads;
-        for (const auto &rec: id_group.second)
-            for (const auto &p: rec.thread_rw)
-                threads.insert(p.first);
-        return threads.size() == 1;
-    }
-
-    void calc_graphs(ostream &stats_stream, size_t threshold) {
-        size_t n = input_rec.size();
-        size_t single_n = erase_count_if(input_rec, cl_single_threaded);
-
+    void calc_graphs(size_t threshold) {
         graphs.reserve(input_rec.size());
-        for (auto &pair: input_rec)
-            graphs.emplace_back(move(pair));
-        map<size_t, vector<AddrRecord>>().swap(input_rec);
+        for (const auto &pair: input_rec)
+            graphs.emplace_back(pair);
         sort(graphs.begin(), graphs.end());
         malloc_fs = accumulate(graphs.begin(), graphs.end(), 0ul,
-                               [](size_t rhs, const Graph &lhs) { return rhs + lhs.estm_fs; });
-
-        size_t small_n = remove_erase_count_if(graphs, [threshold](const Graph &g) { return g.estm_fs < threshold; });
-        stats_stream << m_id << ',' << n << ',' << single_n << ',' << small_n << ',' << graphs.size() << '\n';
+                               [](size_t rhs, const Graph &lhs) { return rhs + lhs.get_n_false_sharing(); });
+        remove_erase_count_if(graphs, [threshold](const Graph &g) {
+            return g.get_n_false_sharing() < threshold;
+        });
     }
 
-    friend ostream &operator << (ostream &os, const MallocStorageT &mst) {
+    bool empty() {
+        return graphs.empty();
+    }
+
+    size_t get_n_false_sharing() const {
+        return malloc_fs;
+    }
+
+    friend ostream &operator<<(ostream &os, const MallocStorageT &mst) {
         os << "=================" << mst.m_id << "(" << mst.malloc_fs << ")================\n";
         for (const Graph &g: mst.graphs)
             os << g;
@@ -325,100 +344,72 @@ struct MallocStorageT {
     void emit_api_output(ostream &os) const {
         os << m_id << '\n';
         os << all_pcs.size() << '\n';
-        for (const PC& pc: all_pcs)
+        for (const PC &pc: all_pcs)
             os << pc.func << ' ' << pc.inst << '\n';
         os << max_malloc_offset << '\n';
         os << n_records << '\n';
-        for (const auto &p: _immutable)
-            for (const auto &ar: p.second) {
-                os << ar.start << ' ' << (ar.end - ar.start) << ' '
-                   << ar.thread_rw.size() << ' ';
-                for (const auto &p2: ar.thread_rw)
-                    os << p2.first << ' ';
-                os << '\n';
-            }
+        for (const auto &p: input_rec)
+            for (const auto &ar: p.second)
+                ar.emit_api_output(os);
     }
 
-    map<size_t, vector<AddrRecord>> input_rec, _immutable;
+private:
+    map<size_t, vector<AddrRecord>> input_rec;
     vector<Graph> graphs;
     set<PC> all_pcs;
     size_t malloc_fs, n_records, max_malloc_offset;
     int m_id;
 };
 
-map<int, MallocStorageT> get_groups_from_log(ifstream &file) {
+map<int, MallocStorageT> compute_from_log(ifstream &file, size_t graph_threshold) {
     map<int, unordered_map<Segment, vector<Record>>> bins;
     map<int, MallocStorageT> ret;
     Record next;
     size_t i = 0;
     while (file >> next) {
-        i++;
-        if (!(i % 10000))
-            cout << i << endl;
+        if (!(i++ % 10000))
+            cout << "line of log read: " << i - 1 << endl;
         auto key = Segment(next.addr, next.addr + next.size);
         bins[next.m_id][key].push_back(next);
     }
-    for (const auto &p: bins)
-        ret[p.first] = MallocStorageT(p.first, p.second);
+    i = 0;
+    for (const auto &p: bins) {
+        if (!(i++ % 1000))
+            cout << "# of mallocs processed: " << i - 1 << '/' << bins.size() << endl;
+        MallocStorageT malloc_t(p.first, p.second, graph_threshold);
+        if (!malloc_t.empty())
+            ret.emplace(p.first, move(malloc_t));
+    }
     return ret;
 }
-
-//void print_malloc(const string &path, const vector<Graph> &graphs) {
-//    ofstream output(insert_suffix(path, "_malloc"));
-//    for (const Graph &g: graphs) {
-//        g_mallocs = g.get_malloc_info()
-//        for mallocId in g_mallocs:
-//        all_mallocs[mallocId].extend(g_mallocs[mallocId])
-//    }
-//
-//    for malloc in sorted(all_mallocs.keys()):
-//    print(malloc, file=file)
-//    print(len(all_mallocs[malloc]), file=file)
-//    for i in sorted(all_mallocs[malloc]):
-//    print(i, file=file, end=' ')
-//    print('', file=file)
-//}
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         cerr << "Usage: " << argv[0] << " LOGFILE" << endl;
         return 1;
     }
-    int threshold = (argc == 3) ? stoi(argv[2]) : 100;
-
     string path = argv[1];
     ifstream file(path);
     if (file.fail())
         return 1;
     std::ios_base::sync_with_stdio(false);
+    size_t threshold = (argc == 3) ? stoul(argv[2]) : 100;
 
-    map<size_t, size_t> fs_cl_ordering;
-
-    auto groups = get_groups_from_log(file);
-    size_t i = 0;
-
+    auto groups = compute_from_log(file, threshold);
     ofstream graphs_stream(insert_suffix(path, "_summary"));
     ofstream api_stream(insert_suffix(path, "_output"));
-    ofstream stats_stream(insert_suffix(path, "_stats_malloc"));
-    ofstream stats2_stream(insert_suffix(path, "_fs_malloc"));
+    ofstream stats_stream(insert_suffix(path, "_fs_malloc"));
     size_t n_mallocs = 0;
-    for (auto &grp: groups) {
-        i++;
-        if (!(i % 1000))
-            cout << i << '/' << groups.size() << endl;
-        grp.second.calc_graphs(stats_stream, threshold);
-        if (!grp.second.graphs.empty()) {
-            n_mallocs++;
-            fs_cl_ordering.emplace(grp.second.malloc_fs, grp.first);
-            graphs_stream << grp.second;
-        }
+    map<size_t, size_t> fs_cl_ordering;
+
+    api_stream << groups.size() << '\n';
+    for (const auto &pair: groups) {
+        n_mallocs++;
+        fs_cl_ordering.emplace(pair.second.get_n_false_sharing(), pair.first);
+        graphs_stream << pair.second;
+        pair.second.emit_api_output(api_stream);
     }
 
-    api_stream << n_mallocs << '\n';
-    for (const auto &grp: groups)
-        if (!grp.second.graphs.empty())
-            grp.second.emit_api_output(api_stream);
-
     for (auto it = fs_cl_ordering.rbegin(); it != fs_cl_ordering.rend(); it++)
-        stats2_stream << '#' << it->first << '@' << it->second << '\n';
+        stats_stream << '#' << it->first << '@' << it->second << '\n';
 }
