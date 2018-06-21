@@ -4,59 +4,6 @@
 
 using namespace std;
 
-class RWCount
-{
-private:
-  int readCount;
-  int writeCount;
-public:
-  RWCount(int r=0, int w=0)
-  {
-    readCount = r;
-    writeCount = w;
-  }
-  void setReadCount(int r)
-  {
-    readCount = r;
-  }
-  void setWriteCount(int w)
-  {
-    writeCount = w;
-  }
-};
-
-class FeatureVector
-{
-private:
-  unsigned int threadCount;
-  RWCount *features;
-public:
-  FeatureVector()
-  {
-    threadCount = 0;
-    features = NULL;
-  }
-  FeatureVector(int tCount)
-  {
-    threadCount = tCount;
-    features = new RWCount[tCount];
-  }
-  void setThreadCount(int tCount)
-  {
-    threadCount = tCount;
-    features = new RWCount[tCount];
-  }
-  void setFeature(int threadId, int readCount, int writeCount)
-  {
-    if(threadId < 0 || threadId >= threadCount)
-    {
-      printf("Invalid thread id, %d\n", threadId);
-      exit(1);
-    }
-    features[threadId].setReadCount(readCount);
-    features[threadId].setWriteCount(writeCount);
-  }
-};
 
 int main(void)
 {
