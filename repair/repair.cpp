@@ -2,27 +2,39 @@
 #include <map>
 #include <vector>
 
+#include "kmeans.h"
+
 using namespace std;
 
 
 int main(void)
 {
-  FILE *fp = fopen("record_output.log", "r");
-  int mallocSize;
-  fscanf(fp, "%d", &mallocSize);
-  int mallocId;
-  int pcSize;
-  int *pcFunctions;
-  int *pcIndices;
-  int mallocSize, numItems;
-  fscanf(fp,"%d",&mallocId);
-  fscanf(fp,"%d",&pcSize);
-  pcFunctions = new int[pcSize];
-  pcIndices = new int[pcSize];
-  for(int i = 0; i < pcSize; i++)
+  FILE *fp = fopen("test.txt", "r");
+  int numMallocs;
+  fscanf(fp, "%d", &numMallocs);
+  for(int i = 0; i <numMallocs; i++)
   {
-    fscanf(fp,"%d %d", &pcFunctions[i], &pcIndices[i]);
+    int mallocId;
+    int pcSize;
+    int *pcFunctions;
+    int *pcIndices;
+    fscanf(fp,"%d",&mallocId);
+    fscanf(fp,"%d",&pcSize);
+    pcFunctions = new int[pcSize];
+    pcIndices = new int[pcSize];
+    for(int j = 0; j < pcSize; j++)
+    {
+      fscanf(fp,"%d %d", &pcFunctions[i], &pcIndices[i]);
+    }
+    vector<FeatureVector *> dataset = readData(fp);
+    for(int j = 0; j < dataset.size(); j++)
+    {
+      FeatureVector * current = dataset[j];
+      current->print();
+    }
   }
+  fclose(fp);
+  /*
   fscanf(fp,"%d %d",&mallocSize, &numItems);
   map<int, vector<int>> threadIds;
   for(int i = 0; i <numItems; i++)
@@ -68,6 +80,6 @@ int main(void)
   {
     fprintf(fp,"%d %d\n", i->first, i->second);
   }
-  fclose(fp);
+  fclose(fp);*/
   return 0;
 }
