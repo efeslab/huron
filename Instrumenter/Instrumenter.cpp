@@ -64,7 +64,7 @@ struct Instrumenter : public FunctionPass {
                                      Value *size, Instruction *insertBefore,
                                      bool isWrite);
     Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
-                                      bool isWrite, size_t accessSizeArrayIndex,
+                                      bool isWrite, uint32_t accessSizeArrayIndex,
                                       unsigned long funcId,
                                       unsigned long instCounter);
 
@@ -81,9 +81,9 @@ struct Instrumenter : public FunctionPass {
     DataLayout *TD;
     int LongSize;
     // READ/WRITE access
-    Function *accessCallback[2][numAccessesSizes];
+    Function *accessCallback;
     Function *ctorFunction;
-    Type *intptrType, *int64Type, *intptrPtrType;
+    Type *intptrType, *int64Type, *boolType;
     InlineAsm *noopAsm;
     std::map<int, StringRef> funcNames;
     int funcCounter;
@@ -138,8 +138,8 @@ bool Instrumenter::doInitialization(Module &M) {
     context = &(M.getContext());
     LongSize = TD->getPointerSizeInBits();
     intptrType = Type::getIntNTy(*context, LongSize);
-    int64Type = intptrType;
-    intptrPtrType = PointerType::get(intptrType, 0);
+    int64Type = Type::getInt64Ty(*context);
+    boolType = Type::getInt8Ty(*context);
 
     // Creating the contrunctor module "instrumenter"
     ctorFunction =
@@ -158,25 +158,29 @@ bool Instrumenter::doInitialization(Module &M) {
                              /*hasSideEffects=*/true);
 
     // Create instrumenation callbacks.
-    for (size_t isWriteAccess = 0; isWriteAccess <= 1; isWriteAccess++) {
-        for (size_t accessSizeArrayIndex = 0;
-             accessSizeArrayIndex < numAccessesSizes; accessSizeArrayIndex++) {
-            // isWrite and typeSize are encoded in the function name.
-            std::string funcName;
-            if (isWriteAccess) {
-                funcName = std::string("store_") +
-                           itostr(1 << accessSizeArrayIndex) + "bytes";
-            } else {
-                funcName = std::string("load_") +
-                           itostr(1 << accessSizeArrayIndex) + "bytes";
-            }
-            // If we are merging crash callbacks, they have two parameters.
-            accessCallback[isWriteAccess][accessSizeArrayIndex] =
-                checkInterfaceFunction(
-                    M.getOrInsertFunction(funcName, IRB.getVoidTy(), intptrType,
-                                          int64Type, int64Type));
-        }
-    }
+    // for (size_t isWriteAccess = 0; isWriteAccess <= 1; isWriteAccess++) {
+    //     for (size_t accessSizeArrayIndex = 0;
+    //          accessSizeArrayIndex < numAccessesSizes; accessSizeArrayIndex++) {
+    //         // isWrite and typeSize are encoded in the function name.
+    //         std::string funcName;
+    //         if (isWriteAccess) {
+    //             funcName = std::string("store_") +
+    //                        itostr(1 << accessSizeArrayIndex) + "bytes";
+    //         } else {
+    //             funcName = std::string("load_") +
+    //                        itostr(1 << accessSizeArrayIndex) + "bytes";
+    //         }
+    //         // If we are merging crash callbacks, they have two parameters.
+    //         accessCallback[isWriteAccess][accessSizeArrayIndex] =
+    //             checkInterfaceFunction(
+    //                 M.getOrInsertFunction(funcName, IRB.getVoidTy(), intptrType,
+    //                                       int64Type, int64Type));
+    //     }
+    // }
+
+    accessCallback = checkInterfaceFunction(M.getOrInsertFunction(
+        "handle_access", IRB.getVoidTy(), intptrType, int64Type, int64Type, int64Type, boolType
+    ));
 
     // We insert an empty inline asm after __asan_report* to avoid callback
     // merge.
@@ -235,22 +239,22 @@ void Instrumenter::instrumentMemoryAccess(Instruction *ins,
     Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
 
     assert(OrigTy->isSized());
-    uint32_t typeSize = TD->getTypeStoreSizeInBits(OrigTy);
+    uint32_t typeSizeBits = TD->getTypeStoreSizeInBits(OrigTy);
 
-    if (typeSize != 8 && typeSize != 16 && typeSize != 32 && typeSize != 64 &&
-        typeSize != 128) {
-        errs() << "ignored typesize is " << typeSize << "at: ";
-        return;
-    }
+    // if (typeSizeBits != 8 && typeSizeBits != 16 && typeSizeBits != 32 && typeSizeBits != 64 &&
+    //     typeSizeBits != 128) {
+    //     errs() << "ignored typesize is " << typeSizeBits << "at: ";
+    //     return;
+    // }
 
     IRBuilder<> IRB(ins);
-    instrumentAddress(ins, IRB, addr, typeSize, isWrite, funcId, instCounter);
+    instrumentAddress(ins, IRB, addr, typeSizeBits >> 3, isWrite, funcId, instCounter);
 }
 
 // General function call before some given instruction
 Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
                                                 Value *addr, bool isWrite,
-                                                size_t accessSizeArrayIndex,
+                                                uint32_t typeBytes,
                                                 unsigned long funcId,
                                                 unsigned long instCounter) {
     IRBuilder<> IRB(insertBefore);
@@ -259,10 +263,10 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
     arguments.push_back(addr);
     arguments.push_back(ConstantInt::get(int64Type, funcId));
     arguments.push_back(ConstantInt::get(int64Type, instCounter));
+    arguments.push_back(ConstantInt::get(int64Type, typeBytes));
+    arguments.push_back(ConstantInt::get(boolType, isWrite));
 
-    CallInst *Call =
-        IRB.CreateCall(accessCallback[isWrite][accessSizeArrayIndex],
-                       ArrayRef<Value *>(arguments));
+    CallInst *Call = IRB.CreateCall(accessCallback, ArrayRef<Value *>(arguments));
 
     // We don't do Call->setDoesNotReturn() because the BB already has
     // UnreachableInst at the end.
@@ -272,27 +276,20 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
     return Call;
 }
 
-static size_t TypeSizeToSizeIndex(uint32_t typeSize) {
-    size_t Res = countTrailingZeros(typeSize / 8);
-    assert(Res < numAccessesSizes);
-    return Res;
-}
-
 void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
-                                     Value *addr, uint32_t typeSize,
+                                     Value *addr, uint32_t typeBytes,
                                      bool isWrite, unsigned long funcId,
                                      unsigned long instCounter) {
 
     Value *actualAddr = IRB.CreatePointerCast(addr, intptrType);
-    size_t accessSizeArrayIndex = TypeSizeToSizeIndex(typeSize);
 
     dbgs() << "Generated function call: " 
            << (isWrite ? "store" : "load")
-           << " size = " << typeSize
-           << "funcId, instId = " << funcId << ", " << instCounter << "\n";
+           << " size = " << typeBytes
+           << " funcId, instId = " << funcId << ", " << instCounter << "\n";
 
     // Insert the callback function here.
-    insertAccessCallback(origIns, actualAddr, isWrite, accessSizeArrayIndex,
+    insertAccessCallback(origIns, actualAddr, isWrite, typeBytes,
                          funcId, instCounter);
 }
 

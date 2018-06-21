@@ -2,13 +2,11 @@
 .idea/
 .vscode/
 cmake-build-debug/
+cmake-build-release/
 
 # Outputs
 *.log
 *.csv
-
-# Predator
-predator_obsolete/
 
 # Temp files of NTFS filesystem
 .fuse*
@@ -18,4 +16,9 @@ predator_obsolete/
 *.o
 *.bc
 tensor
+!tensor/
 false
+!false/
+
+experimental/
+boost_*/

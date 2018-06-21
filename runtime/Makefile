@@ -4,19 +4,20 @@ INCLUDE_DIR = .
 SRCS =  $(SOURCE_DIR)/Runtime.cpp   \
 		$(SOURCE_DIR)/LoggingThread.cpp
 
-INCS =  $(INCLUDE_DIR)/GetGlobal.h       \
-        $(INCLUDE_DIR)/LoggingThread.h   \
+INCS =  $(INCLUDE_DIR)/GetGlobal.h        \
+        $(INCLUDE_DIR)/LoggingThread.h    \
         $(INCLUDE_DIR)/MallocInfo.h       \
-        $(INCLUDE_DIR)/MemArith.h 		 \
-		$(INCLUDE_DIR)/xthread.h         \
+        $(INCLUDE_DIR)/MemArith.h 		  \
+		$(INCLUDE_DIR)/xthread.h          \
+		$(INCLUDE_DIR)/LibFuncs.h         \
 
 DEPS = $(SRCS) $(INCS)
 
-CXX = g++ -std=c++11 -g -O3 -I$(INCLUDE_DIR)
+CXX = clang++ -std=c++1z -g -O3 -I$(INCLUDE_DIR)
 
 CFLAGS   = -fno-omit-frame-pointer -DDEBUG
-CFLAGS32 = $(CFLAGS) -m32 -DX86_32BIT # -O3
-CFLAGS64 = $(CFLAGS) #-m64 # -O3
+CFLAGS32 = $(CFLAGS) -m32 -DX86_32BIT
+CFLAGS64 = $(CFLAGS)
 
 TARGETS = libruntime.so
 

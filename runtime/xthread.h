@@ -37,30 +37,18 @@ Allocate and manage thread index.
 #include <cstdlib>
 
 #include "LoggingThread.h"
+#include "LibFuncs.h"
 
 const int MAX_THREADS = 1 << 7;
 
 __thread Thread *current;
 
-int __internal_pthread_create(pthread_t *t1, const pthread_attr_t *t2,
-                              void *(*t3)(void *), void *t4) {
-    typedef int (*p_create_t)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
-    static p_create_t _pthread_create_ptr;
-    if (_pthread_create_ptr == nullptr) {
-        void *lib_handle = dlopen("libpthread.so.0", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-        if (lib_handle == nullptr) {
-            fprintf(stderr, "Unable to load libpthread.so.0\n");
-            exit(2);
-        }
-        _pthread_create_ptr = (p_create_t) dlsym(lib_handle, "pthread_create");
-        assert(_pthread_create_ptr);
-    }
-    return _pthread_create_ptr(t1, t2, t3, t4);
-}
-
 class xthread {
 private:
-    xthread() = default;
+    xthread() : _aliveThreads(1) {
+        // Reserve space, don't allow the vector to move around.
+        _threads.reserve(MAX_THREADS);
+    }
 
 public:
     static xthread &getInstance() {
@@ -69,145 +57,75 @@ public:
         return *theOneTrueObject;
     }
 
-    /// @brief Initialize the system.
-    void initialize() {
-        _aliveThreads = 1;
-        isMultithreading = false;
-
-        pthread_mutex_init(&_lock, nullptr);
-
-        // Allocate the threadindex for current thread.
-        initInitialThread();
-    }
-
     // Initialize the first threadd
     void initInitialThread() {
-        int tindex;
-
-        // Allocate a global thread index for current thread.
-        tindex = _threadIndex++;
-
-        // First, xdefines::MAX_ALIVE_THREADS is too small.
-        if (tindex == -1) {
-            fprintf(stderr, "The alive threads is larger than xefines::MAX_THREADS larger!!\n");
-            assert(0);
-        }
-
-        // Get corresponding Thread structure.
-        current = getThreadInfo(tindex);
-
-        current->index = tindex;
-        current->self = pthread_self();
-        current->malloc_hook_active = false;
-    }
-
-    Thread *getThreadInfo(int index) {
-        assert(index < MAX_THREADS);
-        return &_threads[index];
+        // Insert a thread in the vector and `current`
+        _threads.emplace_back(0, nullptr, nullptr);
+        current = &_threads.back();
     }
 
     /// Create the wrapper 
     /// @ Intercepting the thread_creation operation.
     int thread_create(pthread_t *tid, const pthread_attr_t *attr, threadFunction *fn, void *arg) {
-        void *ptr = nullptr;
-        int tindex;
-        int result;
+        std::lock_guard<std::mutex> lg(_lock);
 
-        // Lock and record
-        global_lock();
-
-        if (_threadIndex >= MAX_THREADS) {
+        if (_threads.size() >= MAX_THREADS) {
             fprintf(stderr, "Set xdefines::MAX_THREADS to larger. _alivethreads %d MAX_THREADS %d",
                     _aliveThreads, MAX_THREADS);
             abort();
         }
-        // Allocate a global thread index for current thread.
-        tindex = _threadIndex++;
+        // Insert a thread.
+        _threads.emplace_back(_threads.size(), fn, arg);
+        Thread *children = &_threads.back();
+        // Run it starting from the wrapper.
         _aliveThreads++;
-        isMultithreading = true;
+        int result = __internal_pthread_create(tid, attr, startThread, (void *) children);
 
-        // Get corresponding Thread structure.
-        Thread *children = getThreadInfo(tindex);
-
-        children->index = tindex;
-        children->startRoutine = fn;
-        children->startArg = arg;
-        children->malloc_hook_active = false;
-
-        global_unlock();
-
-        result = __internal_pthread_create(tid, attr, startThread, (void *) children);
-
-        // Set up the thread index in the local thread area.
         return result;
     }
-
 
     // @Global entry of all entry function.
     static void *startThread(void *arg) {
-        void *result;
-
         current = (Thread *) arg;
-        //    current->tid = gettid();
-        current->self = pthread_self();
-
-        // from the TLS storage.
-        result = current->startRoutine(current->startArg);
-
-        // Decrease the alive threads
-        xthread::getInstance().removeThread(current);
-
+        // Get current from the TLS storage. Start the thread main routine.
+        void *result = current->startRoutine(current->startArg);
+        // We are done. Remove one thread.
+        xthread::getInstance().removeThread();
         return result;
     }
 
+//    void flush_all() {
+//        assert(current->index == 0);
+//        // Remember to CLOSE all the files to apply changes.
+//        for (auto &th: _threads) {
+//            th.flush_log();
+//            th.stop_logging();
+//        }
+//    }
+
     void flush_all_concat_to(const std::string &output_name) {
-        // Should be run with all other threads finished.
-        //assert(!isMultithreading);
-        // Then we first flush ourselves,
-        _threads[0].flush_log();
-        // and append files together. Remember to CLOSE all the files to apply changes.
-        for (int i = 0; i < _threadIndex; i++) {
-            _threads[i].close_buffer();
-            std::string cat_cmd = "cat " + _threads[i].get_filename() + " >> " + output_name;
-            if (system(cat_cmd.c_str()))
-                throw std::system_error();
-            std::string rm_cmd = "rm " + _threads[i].get_filename();
-            if (system(rm_cmd.c_str()))
-                throw std::system_error();
+        assert(current->index == 0);
+        // Ask all threads to stop writing, and append files together.
+        for (auto &th: _threads) {
+            th.stop_logging();
+            std::string cat_cmd = "cat " + th.get_filename() + " >> " + output_name;
+            system(cat_cmd.c_str());
+            std::string rm_cmd = "rm " + th.get_filename();
+            system(rm_cmd.c_str());
         }
         // std::string wc_out_cmd = "wc -l " + output_name;
         // system(wc_out_cmd.c_str());
     }
 
 private:
-    /// @brief Lock the lock.
-    void global_lock() {
-        pthread_mutex_lock(&_lock);
-    }
-
-    /// @brief Unlock the lock.
-    void global_unlock() {
-        pthread_mutex_unlock(&_lock);
-    }
-
-    void removeThread(Thread *thread) {
-        global_lock();
-
-        // Flush thread log file.
-        thread->flush_log();
-
+    void removeThread() {
+        std::lock_guard<std::mutex> lg(_lock);
         --_aliveThreads;
-        if (_aliveThreads == 1)
-            isMultithreading = false;
-
-        global_unlock();
     }
 
-    pthread_mutex_t _lock;
-    int _threadIndex, _aliveThreads;
-    bool isMultithreading;
-    // Total threads we can support is MAX_THREADS
-    Thread _threads[MAX_THREADS];
+    std::mutex _lock;
+    std::vector<Thread> _threads;
+    int _aliveThreads;
 };
 
 #endif

@@ -2,25 +2,19 @@
 #include <vector>
 #include <mutex>
 #include <unordered_map>
-#include <pthread.h>
+#include <csignal>
 
 #include "MemArith.h"
 #include "xthread.h"
 #include "GetGlobal.h"
+#include "MallocInfo.h"
 
 extern "C" {
-
 uintptr_t globalStart, globalEnd;
-uintptr_t heapStart = ((uintptr_t) 1 << 63), heapEnd;
 
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
-void *malloc(size_t size) noexcept;
 
-void *__libc_malloc(size_t size);
-void __libc_free(void *ptr);
-
-// void free(void *ptr);
 void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write);
 
@@ -59,108 +53,153 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 MallocInfo malloc_sizes;
 std::mutex globals_lock;
 
-class MallocHookDeactivator {
-    Thread *current_copy;
-public:
-    MallocHookDeactivator() noexcept: current_copy(current) { current_copy->malloc_hook_active = false; }
-
-    ~MallocHookDeactivator() noexcept { current_copy->malloc_hook_active = true; }
-
-    Thread *get_current() {
-        return current_copy;
-    }
-};
+std::atomic<size_t> thread0_alloc(0), total_alloc(0);
 
 void initializer(void) {
 #ifdef DEBUG
     printf("Initializing...\n");
 #endif
-    xthread::getInstance().initialize();
     getGlobalRegion(&globalStart, &globalEnd);
-    printf("%p, %p\n", (void*)globalStart, (void*)globalEnd);
-    current->malloc_hook_active = true;
+    printf("%p, %p\n", (void *) globalStart, (void *) globalEnd);
+    xthread::getInstance().initInitialThread();
+    current->all_hooks_active = true;
 }
 
 void finalizer(void) {
-    // RAII deactivate malloc hook so that we can use printf (and malloc) below.
-    MallocHookDeactivator deactiv;
+    current->all_hooks_active = false;
 #ifdef DEBUG
     printf("Finalizing...\n");
 #endif
-    malloc_sizes.dump();
+    printf("Thread 0 alloc'ed %lu bytes (accumulative) out of total %lu;\n", 
+            thread0_alloc.load(), total_alloc.load());
     xthread::getInstance().flush_all_concat_to("record.log");
+    malloc_sizes.dump("malloc.txt");
+    // xthread::getInstance().flush_all_concat_to("record.log");
 }
 
-void *my_malloc_hook(size_t size, const void *caller) {
+void *my_malloc_hook(size_t size) {
+    void *start_ptr = __libc_malloc(size);
+    // size = round_up_size(size, cacheline_size_power);
+    // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
     // RAII deactivate malloc hook so that we can use malloc below.
-    MallocHookDeactivator deactiv;
-    // void *start_ptr = malloc(size);
-    size = round_up_size(size, cacheline_size_power);
-    void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
-    uintptr_t start = (uintptr_t)start_ptr, end = start + size;
+    HookDeactivator deactiv;
+    total_alloc += size;
     // Only record thread 0.
-    if (deactiv.get_current()->index != 0)
-        return start_ptr;
-    // The 3 lines below are single threaded.
-    heapStart = std::min(heapStart, start);
-    heapEnd = std::max(heapEnd, end);
-    malloc_sizes.insert(start, size);
-#ifdef DEBUG
-    // printf("malloc(%lu) returns %p\n", size, start_ptr);
-    // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
-#endif
+    if (deactiv.get_current()->index == 0) {
+        // Global, single-threaded
+        thread0_alloc += size;
+        malloc_sizes.insert((uintptr_t) start_ptr, size);
+    }
     return start_ptr;
 }
 
+void *my_realloc_hook(void *ptr, size_t size) {
+    void *new_start_ptr = __libc_realloc(ptr, size);
+    // RAII deactivate malloc hook so that we can use realloc below.
+    HookDeactivator deactiv;
+    total_alloc += size;
+    // Only record thread 0.
+    if (deactiv.get_current()->index == 0) {
+        thread0_alloc += size;
+        if (ptr) {
+#ifdef DEBUG
+            printf("realloc(%p, %lu)\n", ptr, size);
+#endif
+            // Global, single-threaded
+            assert(malloc_sizes.erase((uintptr_t) ptr));
+        }
+        // Global, single-threaded
+        malloc_sizes.insert((uintptr_t) new_start_ptr, size);
+    }
+    return new_start_ptr;
+}
+
+int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
+    total_alloc += size;
+    int code = __internal_posix_memalign(memptr, alignment, size);
+    if (code)
+        return code;
+#ifdef DEBUG
+    // printf("posix_memalign(%p, %lu, %lu)\n", *memptr, alignment, size);
+#endif
+    // RAII deactivate malloc hook so that we can use malloc below.
+    HookDeactivator deactiv;
+    // Only record thread 0.
+    if (deactiv.get_current()->index == 0) {
+        thread0_alloc += size;
+        // Global, single-threaded
+        malloc_sizes.insert((uintptr_t) *memptr, size);
+    }
+    return code;
+}
+
 void *malloc(size_t size) noexcept {
-    void *caller = __builtin_return_address(0);
-    if (current && current->malloc_hook_active)
-        return my_malloc_hook(size, caller);
+    // void *caller = __builtin_return_address(0);
+    if (current && current->all_hooks_active)
+        return my_malloc_hook(size);
     return __libc_malloc(size);
 }
 
 void *calloc(size_t n, size_t size) {
     size_t total = n * size;
     void *p = malloc(total);
-    if (!p)
-        return NULL;
-    return memset(p, 0, total);
+    return p ? memset(p, 0, total) : nullptr;
 }
 
 void *realloc(void *ptr, size_t size) {
-    return NULL;
+    if (current && current->all_hooks_active)
+        return my_realloc_hook(ptr, size);
+    return __libc_realloc(ptr, size);
 }
 
-void my_free_hook(void *ptr, const void *caller) {
+int posix_memalign(void **memptr, size_t alignment, size_t size) {
+    if (current && current->all_hooks_active)
+        return my_posix_memalign_hook(memptr, alignment, size);
+    return __internal_posix_memalign(memptr, alignment, size);
+}
+
+void my_free_hook(void *ptr) {
     // RAII deactivate malloc hook so that we can use free below.
-    MallocHookDeactivator deactiv;
-    free(ptr);
-#ifdef DEBUG
-    printf("free(%p) called from %p\n", ptr, caller);
-#endif
+    HookDeactivator deactiv;
+    if (ptr && deactiv.get_current()->index == 0)
+        malloc_sizes.erase((uintptr_t) ptr);
+    __libc_free(ptr);
 }
 
 void free(void *ptr) {
-    void *caller = __builtin_return_address(0);
-    // if (current && current->malloc_hook_active)
-    // return my_free_hook(ptr, caller);
-    return __libc_free(ptr);
+    if (current && current->all_hooks_active) {
+        my_free_hook(ptr);
+        return;
+    }
+    __libc_free(ptr);
 }
 
-inline void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
+void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write) {
-    // Quickly return if even not in the range.
-    if ((addr < heapStart || addr >= heapEnd) && (addr < globalStart || addr >= globalEnd))
-        return;
-    MallocHookDeactivator deactiv;
-    LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
-    deactiv.get_current()->log_load_store(rec, is_write);
+    // If on heap:
+    if (malloc_sizes.contain(addr)) {
+        HookDeactivator deactiv;
+        size_t m_id, m_offset;
+        bool is_recorded = malloc_sizes.find_id_offset(addr, m_id, m_offset);
+        if (is_recorded) {
+            LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size,
+                                      (uint32_t) m_id, (uint32_t) m_offset);
+            deactiv.get_current()->log_load_store(rec, is_write);
+        }
+    } else if (addr >= globalStart && addr < globalEnd) { // If on global:
+        HookDeactivator deactiv;
+        LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+        deactiv.get_current()->log_load_store(rec, is_write);
+    }
 }
 
 // Intercept the pthread_create function.
 int pthread_create(pthread_t *tid, const pthread_attr_t *attr,
                    void *(*start_routine)(void *), void *arg) {
-    MallocHookDeactivator deactiv;
-    int res = xthread::getInstance().thread_create(tid, attr, start_routine, arg);
-    return res;
+    if (current && current->all_hooks_active) {
+        HookDeactivator deactiv;
+        int res = xthread::getInstance().thread_create(tid, attr, start_routine, arg);
+        return res;
+    } else
+        return __internal_pthread_create(tid, attr, start_routine, arg);
 }
