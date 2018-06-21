@@ -73,6 +73,23 @@ struct Segment {
     bool operator==(const Segment &rhs) const {
         return start == rhs.start && end == rhs.end;
     }
+
+    bool operator<(const Segment &rhs) const {
+        return start < rhs.start;
+    }
+
+    bool overlap(const Segment &rhs) const {
+        return (start < rhs.end && end > rhs.start) || (rhs.start < end && rhs.end > start);
+    }
+
+    friend ostream &operator<<(ostream &os, const Segment &seg) {
+        os << "(" << seg.start << ", " << seg.end << ")";
+        return os;
+    }
+
+    Segment subtract_by(size_t sz) const {
+        return {start - sz, end - sz};
+    }
 };
 
 namespace std {
@@ -119,11 +136,8 @@ struct Record {
 
 class AddrRecord {
 public:
-    AddrRecord(size_t _start, size_t _end, int m_id, int m_offset, const vector<Record> &records) :
-            malloc_id(m_id) {
-        malloc_start = malloc_id == -1 ? 0 : _start - m_offset;
-        start = _start - malloc_start;
-        end = _end - malloc_start;
+    AddrRecord(Segment _range, int m_id, size_t m_start, const vector<Record> &records) :
+            range(_range), malloc_start(m_start), malloc_id(m_id) {
         for (const auto &rec: records) {
             thread_rw[rec.thread] += rec.rw;
             pc_rw[rec.pc] += rec.rw;
@@ -131,21 +145,21 @@ public:
     }
 
     pair<size_t, size_t> cachelines() const {
-        size_t addr_start = malloc_start + start, addr_end_incl = malloc_start + end - 1;
+        size_t addr_start = malloc_start + range.start, addr_end_incl = malloc_start + range.end - 1;
         size_t start_cl = addr_start >> CACHELINE_BIT, end_cl = addr_end_incl >> CACHELINE_BIT;
         return make_pair(start_cl, end_cl);
     }
 
     friend ostream &operator<<(ostream &os, const AddrRecord &rec) {
         auto p = rec.cachelines();
-        size_t addr_start = rec.malloc_start + rec.start, addr_end = rec.malloc_start + rec.end;
+        size_t addr_start = rec.malloc_start + rec.range.start, addr_end = rec.malloc_start + rec.range.end;
         size_t l = addr_start - (p.first << CACHELINE_BIT), r = addr_end - (p.second << CACHELINE_BIT);
         os << hex;
         if (p.first != p.second)
             os << "(" << p.first << "+0x" << l << ", " << p.second << "+0x" << r << ");";
         else
             os << "(" << "0x" << l << ", " << "0x" << r << ");";
-        os << "m(" << "0x" << rec.start << ", 0x" << rec.end << ')' << ": ";
+        os << "m(" << "0x" << rec.range.start << ", 0x" << rec.range.end << ')' << ": ";
         os << dec;
         print_map(os, rec.thread_rw);
         os << "  ";
@@ -182,11 +196,11 @@ public:
     }
 
     bool operator<(const AddrRecord &rhs) const {
-        return start < rhs.start;
+        return range < rhs.range;
     }
 
     void emit_api_output(ostream &os) const {
-        os << start << ' ' << (end - start) << ' '
+        os << range.start << ' ' << (range.end - range.start) << ' '
            << thread_rw.size() << ' ';
         for (const auto &p2: thread_rw)
             os << p2.first << ' ' << p2.second.r << ' ' << p2.second.w << ' ';
@@ -196,7 +210,7 @@ public:
 private:
     unordered_map<uint32_t, RW> thread_rw;
     unordered_map<PC, RW> pc_rw;
-    size_t start, end;
+    Segment range;
     size_t malloc_start;
     int malloc_id;
 };
@@ -290,33 +304,33 @@ public:
 
     MallocStorageT() : malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(0) {}
 
-    explicit MallocStorageT(int _m_id, const unordered_map<Segment, vector<Record>> &bucket,
+    explicit MallocStorageT(int _m_id, size_t _m_start, const unordered_map<Segment, vector<Record>> &bucket,
                             size_t graph_threshold) :
             malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(_m_id) {
+        find_overlap(_m_id, _m_start, bucket);
         for (const auto &p: bucket) {
-            const Record &ref = p.second.front();
-            size_t start = p.first.start, end = p.first.end;
-            int m_id = ref.m_id, m_offset = ref.m_offset;
-            AddrRecord arec(start, end, m_id, m_offset, p.second);
-            auto cls = arec.cachelines();
-            assert(cls.first <= cls.second);
-            for (size_t i = cls.first; i <= cls.second; i++)
-                input_rec[i].push_back(arec);
-            n_records += cls.second - cls.first + 1;
+            Segment seg = p.first.subtract_by(_m_start);
+            records.emplace_back(seg, _m_id, _m_start, p.second);
             for (const auto &rec: p.second) {
                 if (rec.m_offset != -1)
                     max_malloc_offset = max(max_malloc_offset, size_t(rec.m_offset));
                 all_pcs.insert(rec.pc);
             }
         }
-        for (auto &p: input_rec)
+        for (const auto &rec: records) {
+            auto cls = rec.cachelines();
+            assert(cls.first <= cls.second);
+            for (size_t i = cls.first; i <= cls.second; i++)
+                cachelines[i].push_back(rec);
+        }
+        for (auto &p: cachelines)
             sort(p.second.begin(), p.second.end());
         calc_graphs(graph_threshold);
     }
 
     void calc_graphs(size_t threshold) {
-        graphs.reserve(input_rec.size());
-        for (const auto &pair: input_rec)
+        graphs.reserve(cachelines.size());
+        for (const auto &pair: cachelines)
             graphs.emplace_back(pair);
         sort(graphs.begin(), graphs.end());
         malloc_fs = accumulate(graphs.begin(), graphs.end(), 0ul,
@@ -348,13 +362,23 @@ public:
             os << pc.func << ' ' << pc.inst << '\n';
         os << max_malloc_offset << '\n';
         os << n_records << '\n';
-        for (const auto &p: input_rec)
-            for (const auto &ar: p.second)
-                ar.emit_api_output(os);
+        for (const auto &rec: records)
+            rec.emit_api_output(os);
     }
 
 private:
-    map<size_t, vector<AddrRecord>> input_rec;
+    void find_overlap(int m_id, size_t m_start, const unordered_map<Segment, vector<Record>> &bucket) {
+        const Segment *prev = nullptr;
+        for (const auto &it : bucket) {
+            if (prev && prev->overlap(it.first))
+                cerr << "Warning: offset range " << prev->subtract_by(m_start) << " overlaps with "
+                     << it.first.subtract_by(m_start) << " in malloc " << m_id << '\n';
+            prev = &it.first;
+        }
+    }
+
+    map<size_t, vector<AddrRecord>> cachelines;
+    vector<AddrRecord> records;
     vector<Graph> graphs;
     set<PC> all_pcs;
     size_t malloc_fs, n_records, max_malloc_offset;
@@ -363,6 +387,7 @@ private:
 
 map<int, MallocStorageT> compute_from_log(ifstream &file, size_t graph_threshold) {
     map<int, unordered_map<Segment, vector<Record>>> bins;
+    map<int, size_t> malloc_start;
     map<int, MallocStorageT> ret;
     Record next;
     size_t i = 0;
@@ -371,12 +396,13 @@ map<int, MallocStorageT> compute_from_log(ifstream &file, size_t graph_threshold
             cout << "line of log read: " << i - 1 << endl;
         auto key = Segment(next.addr, next.addr + next.size);
         bins[next.m_id][key].push_back(next);
+        malloc_start.emplace(next.m_id, next.addr - next.m_offset);
     }
     i = 0;
     for (const auto &p: bins) {
         if (!(i++ % 1000))
             cout << "# of mallocs processed: " << i - 1 << '/' << bins.size() << endl;
-        MallocStorageT malloc_t(p.first, p.second, graph_threshold);
+        MallocStorageT malloc_t(p.first, malloc_start[p.first], p.second, graph_threshold);
         if (!malloc_t.empty())
             ret.emplace(p.first, move(malloc_t));
     }
