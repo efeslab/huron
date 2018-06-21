@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <execinfo.h>
 #include <cassert>
+#include <algorithm>
 #include "Segment.h"
 #include "LoggingThread.h"
 #include "SymbolCache.h"
@@ -45,6 +46,10 @@ class MallocInfo {
 
         explicit PerBt(uintptr_t _addr, size_t _id, size_t _size)
                 : addr(_addr), id(_id), size(_size) {}
+
+        bool operator < (const PerBt &rhs) const {
+            return addr < rhs.addr;
+        }
     };
 
     // This is an (ordered) map because we need to query lower bound for incoming access addresses.
@@ -58,15 +63,20 @@ public:
         HookDeactivator deactiv;
     }
 
-    void dump(const char *path) {
+    void dump(const char *path) const {
         FILE *file = fopen(path, "w");
         assert(file);
         SymbolCache scache;
+        std::vector<PerBt> all_records;
         for (const auto &p: data_total) {
             for (const auto &per_bt: p.second)
                 fprintf(file, "%lu,%p,%lu\n", per_bt.id, (void *) per_bt.addr, per_bt.size);
             scache.backtrace_symbols_fd(p.first, file);
+            all_records.insert(all_records.end(), p.second.begin(), p.second.end());
         }
+        std::sort(all_records.begin(), all_records.end());
+        for (const auto &per_bt: all_records)
+            fprintf(file, "%lu,%p,%lu\n", per_bt.id, (void *) per_bt.addr, per_bt.size);
     }
 
     void insert(uintptr_t start, size_t size) {
