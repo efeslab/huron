@@ -299,7 +299,7 @@ struct MallocStorageT {
         return threads.size() == 1;
     }
 
-    void calc_graphs(ostream &stats_stream, size_t threshold = 100) {
+    void calc_graphs(ostream &stats_stream, size_t threshold) {
         size_t n = input_rec.size();
         size_t single_n = erase_count_if(input_rec, cl_single_threaded);
 
@@ -322,7 +322,7 @@ struct MallocStorageT {
         return os;
     }
 
-    void emit_api_output(ostream &os) {
+    void emit_api_output(ostream &os) const {
         os << m_id << '\n';
         os << all_pcs.size() << '\n';
         for (const PC& pc: all_pcs)
@@ -380,10 +380,12 @@ map<int, MallocStorageT> get_groups_from_log(ifstream &file) {
 //}
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
+    if (argc < 2) {
         cerr << "Usage: " << argv[0] << " LOGFILE" << endl;
         return 1;
     }
+    int threshold = (argc == 3) ? stoi(argv[2]) : 100;
+
     string path = argv[1];
     ifstream file(path);
     if (file.fail())
@@ -399,17 +401,23 @@ int main(int argc, char *argv[]) {
     ofstream api_stream(insert_suffix(path, "_output"));
     ofstream stats_stream(insert_suffix(path, "_stats_malloc"));
     ofstream stats2_stream(insert_suffix(path, "_fs_malloc"));
+    size_t n_mallocs = 0;
     for (auto &grp: groups) {
         i++;
         if (!(i % 1000))
             cout << i << '/' << groups.size() << endl;
-        grp.second.calc_graphs(stats_stream);
+        grp.second.calc_graphs(stats_stream, threshold);
         if (!grp.second.graphs.empty()) {
+            n_mallocs++;
             fs_cl_ordering.emplace(grp.second.malloc_fs, grp.first);
             graphs_stream << grp.second;
-            grp.second.emit_api_output(api_stream);
         }
     }
+
+    api_stream << n_mallocs << '\n';
+    for (const auto &grp: groups)
+        if (!grp.second.graphs.empty())
+            grp.second.emit_api_output(api_stream);
 
     for (auto it = fs_cl_ordering.rbegin(); it != fs_cl_ordering.rend(); it++)
         stats2_stream << '#' << it->first << '@' << it->second << '\n';
