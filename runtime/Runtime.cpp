@@ -182,13 +182,13 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
         size_t m_id, m_offset;
         bool is_recorded = malloc_sizes.find_id_offset(addr, m_id, m_offset);
         if (is_recorded) {
-            LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size,
+            LocRecord rec = LocRecord(addr, (uint32_t) func_id, (uint32_t) inst_id, (uint16_t) size,
                                       (uint32_t) m_id, (uint32_t) m_offset);
             deactiv.get_current()->log_load_store(rec, is_write);
         }
     } else if (addr >= globalStart && addr < globalEnd) { // If on global:
         HookDeactivator deactiv;
-        LocRecord rec = LocRecord(addr, (uint16_t) func_id, (uint16_t) inst_id, (uint16_t) size);
+        LocRecord rec = LocRecord(addr, (uint32_t) func_id, (uint32_t) inst_id, (uint16_t) size);
         deactiv.get_current()->log_load_store(rec, is_write);
     }
 }

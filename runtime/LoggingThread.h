@@ -11,16 +11,17 @@ const size_t LOG_SIZE = 1 << 16;
 
 struct LocRecord {
     uintptr_t addr;
-    uint16_t func_id, inst_id, size;
+    uint32_t func_id, inst_id;
+    uint16_t size;
     bool is_heap;
     uint32_t m_id, m_offset;
 
-    LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size,
+    LocRecord(uintptr_t _addr, uint32_t _func_id, uint32_t _inst_id, uint16_t _size,
               uint32_t m_id, uint32_t m_size) :
             addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size),
             is_heap(true), m_id(m_id), m_offset(m_size) {}
 
-    LocRecord(uintptr_t _addr, uint16_t _func_id, uint16_t _inst_id, uint16_t _size) :
+    LocRecord(uintptr_t _addr, uint32_t _func_id, uint32_t _inst_id, uint16_t _size) :
             addr(_addr), func_id(_func_id), inst_id(_inst_id), size(_size),
             is_heap(false), m_id(), m_offset() {}
 
