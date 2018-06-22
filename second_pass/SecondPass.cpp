@@ -87,15 +87,21 @@ public:
   }
   void * isFalseSharingAddress(void *address)
   {
-    auto it = findMap.upper_bound(address);
-    if(it==findMap.begin())return address;
+    /*auto it = findMap.upper_bound(address);;
+    if(it==findMap.end())return address;
     it--;
-    MallocInformation * currentMalloc = it->second;
-    if(currentMalloc == NULL) return address;
+    MallocInformation * currentMalloc = it->second;*/
+    MallocInformation * currentMalloc = allMallocs[0];
+    if(currentMalloc == NULL)
+    {
+      //printf("n1\n");
+      return address;
+    }
     long difference = (uintptr_t)address - (uintptr_t)(currentMalloc->start);
     if((difference >= 0) && (difference < currentMalloc->offsetLength))
     {
       //do some other checking
+      printf("%p->%p\n",address, (currentMalloc->start+currentMalloc->offsets[difference]));
       return (currentMalloc->start+currentMalloc->offsets[difference]);
       //unsigned int currentOffset = (long)address - (long)(currentMalloc->start);
       //auto foundIt = currentMalloc->offsets.find(currentOffset);
@@ -103,7 +109,11 @@ public:
       //if(foundIt==currentMalloc->offsets.end())return false;
       //else return true;
     }
-    else return address;
+    else
+    {
+      //printf("n2\n");
+      return address;
+    }
   }
 };
 
