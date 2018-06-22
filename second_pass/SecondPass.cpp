@@ -15,6 +15,7 @@ public:
   unsigned int id;
   void* start;
   size_t size;
+  size_t paddedSize;
   unsigned int offsetLength;
   unsigned int *offsets;
 };
@@ -42,16 +43,19 @@ public:
       currentMalloc->id = id;
       fscanf(fp, "%u", &(currentMalloc->offsetLength));
       currentMalloc->offsets = new unsigned int[currentMalloc->offsetLength];
+      unsigned pSize, diffSize;
+      fscanf(fp,"%u %u",&pSize, &diffSize);
+      currentMalloc->paddedSize = pSize;
       unsigned int offset, original;
       for(unsigned int i=0; i<currentMalloc->offsetLength; i++)
       {
         fscanf(fp, "%u %u", &original, &offset);
-        if(i!=original)
+        /*if(i!=original)
         {
-          printf("Error original index is not contigious\n");
+          printf("%d %d\tError original index is not contigious\n", i, original);
           continue;
-        }
-        currentMalloc->offsets[offset] = true;
+        }*/
+        currentMalloc->offsets[original] = offset;
       }
       allMallocs.push_back(currentMalloc);
     }
@@ -59,6 +63,13 @@ public:
     this->size = allMallocs.size();
     //printf("%d\n",size);
     fclose(fp);
+  }
+  size_t get_padded_size(unsigned int id, size_t size)
+  {
+    if(currentIndex >= this->size)return size;
+    if(id<allMallocs[currentIndex]->id)return size;
+    if(id>allMallocs[currentIndex]->id)return size;
+    return allMallocs[currentIndex]->paddedSize;
   }
   void push_new_malloc(unsigned int id, void * start, size_t size)
   {
@@ -143,11 +154,14 @@ void finalizer(void) {
 void *my_malloc_hook(size_t size, const void *caller) {
     // RAII deactivate malloc hook so that we can use malloc below.
     MallocHookDeactivator deactiv;
-    void *alloced = malloc(size);
+    size_t paddedSize=size;
+    if(getThreadIndex() == 0)paddedSize = allMallocInformation->get_padded_size(mallocId, size);
+    void *alloced = malloc(paddedSize);//aligned_alloc(64, paddedSize);
+    memset(alloced, 0, paddedSize);
     //mallocStarts.push_back(alloced);
     //mallocOffsets.push_back(size);
     heapStart = std::min(heapStart, alloced);
-    heapEnd = std::max(heapEnd, alloced + size);
+    heapEnd = std::max(heapEnd, alloced + paddedSize);
 #ifdef DEBUG
     // printf("malloc(%lu) called from %p returns %p\n", size, caller, alloced);
     // printf("heapStart = %p, heapEnd = %p\n", heapStart, heapEnd);
@@ -155,7 +169,7 @@ void *my_malloc_hook(size_t size, const void *caller) {
     // Record that range of address.
     if (getThreadIndex() == 0)
     {
-        allMallocInformation->push_new_malloc(mallocId++, alloced, size);
+        allMallocInformation->push_new_malloc(mallocId++, alloced, paddedSize);
     }
     return alloced;
 }

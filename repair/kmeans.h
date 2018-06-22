@@ -84,7 +84,27 @@ unsigned getClosestCentroid(vector<FeatureVector *> &centroids, FeatureVector *f
   return result;
 }
 
-void /*vector<unsigned>*/ kmeans(unsigned k, vector<FeatureVector *> dataset)
+void updateAssignments(vector<FeatureVector *> &centroids, vector<FeatureVector *> &dataset, vector<unsigned> &assignments)
+{
+  for(unsigned i = 0; i < dataset.size(); i++)
+  {
+    assignments[i] = getClosestCentroid(centroids, dataset[i]);
+  }
+}
+
+void updateCentroid(FeatureVector *centroid, vector<FeatureVector *> &dataset, vector<unsigned> &assignments)
+{
+  map<unsigned, RWCounts *>::iterator centroidFeatureIterator;
+  for(centroidFeatureIterator=centroid->features.begin(); centroidFeatureIterator!=centroid->features.end(); centroidFeatureIterator++)
+  {
+    RWCounts *rwc = centroidFeatureIterator->second;
+    rwc->readCounts = 0;
+    rwc->writeCounts = 0;
+    // 
+  }
+}
+
+void /*vector<unsigned>*/ kmeans(unsigned k, vector<FeatureVector *> &dataset)
 {
   //initialize
   map<unsigned, RWCounts*> presentThreadIds;
