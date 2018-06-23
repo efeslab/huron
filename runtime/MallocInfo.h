@@ -99,7 +99,7 @@ public:
         if (it == data_alive.end())
             return false;
         size_t size = it->second.size;
-        heap.shrink(AddrSeg(addr, size));
+        heap.shrink(AddrSeg(addr, addr + size));
         data_alive.erase(it);
         return true;
     }

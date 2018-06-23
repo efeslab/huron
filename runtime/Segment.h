@@ -3,28 +3,28 @@
 
 template <typename T>
 class Segment {
-    T begin, end;
+    T start, end;
 public:
     Segment() = default;
 
-    Segment(T offset, T size): begin(offset), end(offset + size) {}
+    Segment(T _start, T _end): start(_start), end(_end) {}
 
     void insert(const Segment &rhs) {
-        begin = std::min(begin, rhs.begin);
+        start = std::min(start, rhs.start);
         end = std::max(end, rhs.end);
     }
 
     void shrink(const Segment &rhs) {
-        if (rhs.begin <= begin && rhs.end > begin) {
-            begin = rhs.end;
+        if (rhs.start <= start && rhs.end > start) {
+            start = rhs.end;
         }
-        else if (rhs.begin < end && rhs.end >= begin) {
-            end = rhs.begin;
+        else if (rhs.start < end && rhs.end >= start) {
+            end = rhs.start;
         }
     }
 
     inline bool contain(T val) {
-        return begin <= val && val < end;
+        return start <= val && val < end;
     }
 };
 
