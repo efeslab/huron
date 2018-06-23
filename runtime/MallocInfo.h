@@ -17,6 +17,7 @@
 #include "Segment.h"
 #include "LoggingThread.h"
 #include "SymbolCache.h"
+#include "SharedSpinLock.h"
 
 namespace std {
     template<class T>
@@ -55,7 +56,8 @@ class MallocInfo {
     // This is an (ordered) map because we need to query lower bound for incoming access addresses.
     std::map<uintptr_t, PerAddr> data_alive;
     std::unordered_map<std::vector<void *>, std::vector<PerBt>> data_total;
-    std::shared_timed_mutex mutex;
+    // std::shared_timed_mutex mutex;
+    SharedSpinLock lock;
     AddrSeg heap;
     size_t id;
 public:
@@ -85,22 +87,25 @@ public:
         static void *bt_buf[1000];
         int bt_size = backtrace(bt_buf, 1000);
         std::vector<void *> bt(bt_buf, bt_buf + bt_size);
-        mutex.lock();
+        lock.lock();
         data_alive[start] = PerAddr(id, size);
-        mutex.unlock();
+        lock.unlock();
         heap.insert(AddrSeg(start, start + size));
         data_total[bt].emplace_back(start, id, size);
         id++;
     }
 
     bool erase(uintptr_t addr) {
-        std::unique_lock<std::shared_timed_mutex> ul(mutex);
+        lock.lock();
         auto it = data_alive.find(addr);
-        if (it == data_alive.end())
+        if (it == data_alive.end()) {
+            lock.unlock();
             return false;
+        }
         size_t size = it->second.size;
-        heap.shrink(AddrSeg(addr, addr + size));
         data_alive.erase(it);
+        lock.unlock();
+        heap.shrink(AddrSeg(addr, addr + size));
         return true;
     }
 
@@ -111,16 +116,18 @@ public:
     bool find_id_offset(uintptr_t addr, size_t &id, size_t &offset) {
         // Find the first starting address greater than `addr`, then it--
         // to get where `addr` falls in.
-        std::shared_lock<std::shared_timed_mutex> ul(mutex);
+        lock.lock_shared();
         auto it = data_alive.upper_bound(addr);
         if (it != data_alive.begin()) {
             it--;
             if (it->first + it->second.size > addr) {
                 id = it->second.id;
                 offset = addr - it->first;
+                lock.unlock_shared();
                 return true;
             }
         }
+        lock.unlock_shared();
         return false;
     }
 };
