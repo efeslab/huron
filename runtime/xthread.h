@@ -94,15 +94,6 @@ public:
         return result;
     }
 
-//    void flush_all() {
-//        assert(current->index == 0);
-//        // Remember to CLOSE all the files to apply changes.
-//        for (auto &th: _threads) {
-//            th.flush_log();
-//            th.stop_logging();
-//        }
-//    }
-
     void flush_all_concat_to(const std::string &output_name) {
         assert(current->index == 0);
         // Ask all threads to stop writing, and append files together.

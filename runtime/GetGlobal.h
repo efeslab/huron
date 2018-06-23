@@ -1,9 +1,11 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <iostream>
+#include "Segment.h"
 
 // We may use a inode attribute to analyze whether we need to do this.
-void getRegionInfo(std::string &curentry, void **start, void **end) {
+void getRegionInfo(std::string &curentry, uintptr_t *start, uintptr_t *end) {
     using namespace std;
     // Now this entry is about globals of libc.so.
     string::size_type pos = 0;
@@ -28,13 +30,13 @@ void getRegionInfo(std::string &curentry, void **start, void **end) {
     endstr = curentry.substr(endpos, pos - endpos);
 
     // Save this entry to the passed regions.
-    *start = (void *) strtoul(beginstr.c_str(), nullptr, 16);
-    *end = (void *) strtoul(endstr.c_str(), nullptr, 16);
+    *start = strtoul(beginstr.c_str(), nullptr, 16);
+    *end = strtoul(endstr.c_str(), nullptr, 16);
 
 }
 
 // Trying to get information about global regions.
-void getGlobalRegion(uintptr_t *start, uintptr_t *end) {
+AddrSeg getGlobalRegion() {
     using namespace std;
     ifstream iMapfile;
     string curentry;
@@ -47,7 +49,7 @@ void getGlobalRegion(uintptr_t *start, uintptr_t *end) {
     }
 
     // Now we analyze each line of this maps file.
-    void *startaddr, *endaddr;
+    uintptr_t startaddr, endaddr;
     string nextentry;
 
     while (getline(iMapfile, curentry)) {
@@ -58,15 +60,12 @@ void getGlobalRegion(uintptr_t *start, uintptr_t *end) {
             getRegionInfo(curentry, &startaddr, &endaddr);
 
             getline(iMapfile, nextentry);
-
-            void *newstart;
-            void *newend;
-            assert(nextentry.find("lib") == string::npos || (nextentry.find(" rw-p ") != string::npos));
+            uintptr_t newstart, newend;
+            if (nextentry.find("lib") != string::npos && (nextentry.find(" rw-p ") == string::npos))
+                return AddrSeg(0, 0);
             getRegionInfo(nextentry, &newstart, &newend);
-            *start = (uintptr_t)startaddr;
-            *end = (uintptr_t)(newstart == endaddr ? newend : endaddr);
-            break;
+            return AddrSeg(startaddr, (newstart == endaddr ? newend : endaddr));
         }
     }
-    iMapfile.close();
+    return AddrSeg(0, 0);  // info not found
 }

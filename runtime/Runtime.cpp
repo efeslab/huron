@@ -10,8 +10,6 @@
 #include "MallocInfo.h"
 
 extern "C" {
-uintptr_t globalStart, globalEnd;
-
 void initializer(void) __attribute__((constructor));
 void finalizer(void) __attribute__((destructor));
 
@@ -51,16 +49,14 @@ void load_1bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
 }
 
 MallocInfo malloc_sizes;
-std::mutex globals_lock;
-
+AddrSeg global;
 std::atomic<size_t> thread0_alloc(0), total_alloc(0);
 
 void initializer(void) {
 #ifdef DEBUG
     printf("Initializing...\n");
 #endif
-    getGlobalRegion(&globalStart, &globalEnd);
-    printf("%p, %p\n", (void *) globalStart, (void *) globalEnd);
+    global = getGlobalRegion();
     xthread::getInstance().initInitialThread();
     current->all_hooks_active = true;
 }
@@ -69,17 +65,15 @@ void finalizer(void) {
     current->all_hooks_active = false;
 #ifdef DEBUG
     printf("Finalizing...\n");
+    printf("Thread 0 alloc'ed %lu bytes (accumulative) out of total %lu;\n",
+           thread0_alloc.load(), total_alloc.load());
 #endif
-    printf("Thread 0 alloc'ed %lu bytes (accumulative) out of total %lu;\n", 
-            thread0_alloc.load(), total_alloc.load());
     xthread::getInstance().flush_all_concat_to("record.log");
     malloc_sizes.dump("malloc.txt");
-    // xthread::getInstance().flush_all_concat_to("record.log");
 }
 
 void *my_malloc_hook(size_t size) {
     void *start_ptr = __libc_malloc(size);
-    // size = round_up_size(size, cacheline_size_power);
     // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
     // RAII deactivate malloc hook so that we can use malloc below.
     HookDeactivator deactiv;
@@ -102,9 +96,6 @@ void *my_realloc_hook(void *ptr, size_t size) {
     if (deactiv.get_current()->index == 0) {
         thread0_alloc += size;
         if (ptr) {
-#ifdef DEBUG
-            printf("realloc(%p, %lu)\n", ptr, size);
-#endif
             // Global, single-threaded
             assert(malloc_sizes.erase((uintptr_t) ptr));
         }
@@ -119,9 +110,6 @@ int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
     int code = __internal_posix_memalign(memptr, alignment, size);
     if (code)
         return code;
-#ifdef DEBUG
-    // printf("posix_memalign(%p, %lu, %lu)\n", *memptr, alignment, size);
-#endif
     // RAII deactivate malloc hook so that we can use malloc below.
     HookDeactivator deactiv;
     // Only record thread 0.
@@ -134,7 +122,6 @@ int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
 }
 
 void *malloc(size_t size) noexcept {
-    // void *caller = __builtin_return_address(0);
     if (current && current->all_hooks_active)
         return my_malloc_hook(size);
     return __libc_malloc(size);
@@ -186,7 +173,7 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                                       (uint32_t) m_id, (uint32_t) m_offset);
             deactiv.get_current()->log_load_store(rec, is_write);
         }
-    } else if (addr >= globalStart && addr < globalEnd) { // If on global:
+    } else if (global.contain(addr)) { // If on global:
         HookDeactivator deactiv;
         LocRecord rec = LocRecord(addr, (uint32_t) func_id, (uint32_t) inst_id, (uint16_t) size);
         deactiv.get_current()->log_load_store(rec, is_write);
