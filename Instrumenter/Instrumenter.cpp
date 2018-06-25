@@ -45,9 +45,6 @@
 
 using namespace llvm;
 
-// We only support 5 sizes(powers of two): 1, 2, 4, 8, 16.
-static const size_t numAccessesSizes = 5;
-
 namespace {
 
 /// Instrumenter: instrument the memory accesses.
@@ -59,10 +56,6 @@ struct Instrumenter : public FunctionPass {
     void instrumentAddress(Instruction *origIns, IRBuilder<> &IRB, Value *addr,
                            uint32_t typeSize, bool isWrite,
                            unsigned long funcId, unsigned long instCounter);
-    bool instrumentMemIntrinsic(MemIntrinsic *mInst);
-    void instrumentMemIntrinsicParam(Instruction *origIns, Value *addr,
-                                     Value *size, Instruction *insertBefore,
-                                     bool isWrite);
     Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
                                       bool isWrite, uint32_t accessSizeArrayIndex,
                                       unsigned long funcId,
@@ -80,9 +73,7 @@ struct Instrumenter : public FunctionPass {
     LLVMContext *context;
     DataLayout *TD;
     int LongSize;
-    // READ/WRITE access
-    Function *accessCallback;
-    Function *ctorFunction;
+    Function *accessCallback, *ctorFunction;
     Type *intptrType, *int64Type, *boolType;
     InlineAsm *noopAsm;
     std::map<int, StringRef> funcNames;
@@ -92,10 +83,12 @@ struct Instrumenter : public FunctionPass {
 } // namespace
 
 char Instrumenter::ID = 0;
-static RegisterPass<Instrumenter>
-    instrumenter("instrumenter", "Instrumenting READ/WRITE pass", false, false);
+static RegisterPass<Instrumenter> instrumenter(
+    "instrumenter", "Instrumenting READ/WRITE pass", false, false
+);
 static cl::opt<int> startFrom(
-    "start-from", cl::init(0), cl::desc("Start function id from N"), cl::Hidden);
+    "start-from", cl::init(0), cl::desc("Start function id from N"), cl::Hidden
+);
 static cl::opt<int> maxInsPerBB(
     "max-ins-per-bb", cl::init(10000),
     cl::desc("maximal number of instructions to instrument in any given BB"),
@@ -115,23 +108,14 @@ static cl::opt<bool> toInstrumentAtomics(
     cl::desc("instrument atomic instructions (rmw, cmpxchg)"), cl::Hidden,
     cl::init(true));
 
-// INITIALIZE_PASS(Instrumenter, "Instrumenter",
-//                 "Instrumenting Read/Write accesses",
-//                 false, false)
 Instrumenter::Instrumenter() : FunctionPass(ID) {}
 
 StringRef Instrumenter::getPassName() const { return "Instrumenter"; }
 
 // virtual: define some initialization for the whole module
 bool Instrumenter::doInitialization(Module &M) {
-
-    errs() << "\n^^^^^^^^^^^^^^^^^^Instrumenter "
-              "initialization^^^^^^^^^^^^^^^^^^^^^^^^^"
-           << "\n";
-    // TD = getAnalysisIfAvailable<DataLayout>();
+    dbgs() << "\n^^^^^^^^^^^^^^^^^^Instrumenter initialization^^^^^^^^^^^^^^^^^^^^^^^^^\n";
     TD = new DataLayout(&M);
-    // if (!TD)
-    //   return false;
 
     funcCounter = startFrom;
 
@@ -157,35 +141,9 @@ bool Instrumenter::doInitialization(Module &M) {
                              StringRef(""), StringRef(""),
                              /*hasSideEffects=*/true);
 
-    // Create instrumenation callbacks.
-    // for (size_t isWriteAccess = 0; isWriteAccess <= 1; isWriteAccess++) {
-    //     for (size_t accessSizeArrayIndex = 0;
-    //          accessSizeArrayIndex < numAccessesSizes; accessSizeArrayIndex++) {
-    //         // isWrite and typeSize are encoded in the function name.
-    //         std::string funcName;
-    //         if (isWriteAccess) {
-    //             funcName = std::string("store_") +
-    //                        itostr(1 << accessSizeArrayIndex) + "bytes";
-    //         } else {
-    //             funcName = std::string("load_") +
-    //                        itostr(1 << accessSizeArrayIndex) + "bytes";
-    //         }
-    //         // If we are merging crash callbacks, they have two parameters.
-    //         accessCallback[isWriteAccess][accessSizeArrayIndex] =
-    //             checkInterfaceFunction(
-    //                 M.getOrInsertFunction(funcName, IRB.getVoidTy(), intptrType,
-    //                                       int64Type, int64Type));
-    //     }
-    // }
-
     accessCallback = checkInterfaceFunction(M.getOrInsertFunction(
         "handle_access", IRB.getVoidTy(), intptrType, int64Type, int64Type, int64Type, boolType
     ));
-
-    // We insert an empty inline asm after __asan_report* to avoid callback
-    // merge.
-    // noopAsm = InlineAsm::get(FunctionType::get(IRB.getVoidTy(), false),
-    //                          StringRef(""), StringRef(""), true);
     return true;
 }
 
@@ -197,31 +155,26 @@ void Instrumenter::getAnalysisUsage(AnalysisUsage& AU) const {
 // and set isWrite. Otherwise return nullptr.
 static Value *isInterestingMemoryAccess(Instruction *ins, bool *isWrite) {
     if (LoadInst *LI = dyn_cast<LoadInst>(ins)) {
-
         if (!toInstrumentReads)
             return nullptr;
-        //    errs() << "instruction is a load instruction\n\n";
         *isWrite = false;
         return LI->getPointerOperand();
     }
     if (StoreInst *SI = dyn_cast<StoreInst>(ins)) {
         if (!toInstrumentWrites)
             return nullptr;
-        //   errs() << "instruction is a store instruction\n\n";
         *isWrite = true;
         return SI->getPointerOperand();
     }
     if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(ins)) {
         if (!toInstrumentAtomics)
             return nullptr;
-        //  errs() << "instruction is a atomic READ and Write instruction\n\n";
         *isWrite = true;
         return RMW->getPointerOperand();
     }
     if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(ins)) {
         if (!toInstrumentAtomics)
             return nullptr;
-        //  errs() << "instruction is a atomic cmpXchg instruction\n\n";
         *isWrite = true;
         return XCHG->getPointerOperand();
     }
@@ -240,12 +193,6 @@ void Instrumenter::instrumentMemoryAccess(Instruction *ins,
 
     assert(OrigTy->isSized());
     uint32_t typeSizeBits = TD->getTypeStoreSizeInBits(OrigTy);
-
-    // if (typeSizeBits != 8 && typeSizeBits != 16 && typeSizeBits != 32 && typeSizeBits != 64 &&
-    //     typeSizeBits != 128) {
-    //     errs() << "ignored typesize is " << typeSizeBits << "at: ";
-    //     return;
-    // }
 
     IRBuilder<> IRB(ins);
     instrumentAddress(ins, IRB, addr, typeSizeBits >> 3, isWrite, funcId, instCounter);
@@ -300,7 +247,6 @@ void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
 Function *Instrumenter::checkInterfaceFunction(Constant *FuncOrBitcast) {
     if (isa<Function>(FuncOrBitcast))
         return cast<Function>(FuncOrBitcast);
-    //  FuncOrBitcast->dump();
     report_fatal_error("trying to redefine an Instrumenter "
                        "interface function");
 }
