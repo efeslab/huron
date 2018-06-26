@@ -84,6 +84,24 @@ public:
         id++;
     }
 
+    void insert(uintptr_t start, size_t size, uint64_t func_id, uint64_t inst_id) {
+        // This function itself is single threaded,
+        // so not all operations need protection with lock.
+        static void *bt_buf[1000];
+        int bt_size = backtrace(bt_buf, 1000);
+        std::vector<void *> bt(bt_buf, bt_buf + bt_size);
+        mutex.lock();
+        data_alive[start] = PerAddr(id, size, bt);
+        mutex.unlock();
+        heap.insert(AddrSeg(start, start + size));
+        data_total[bt].emplace_back(start, id, size);
+        id++;
+        FILE *mallocRuntimeIDs = fopen("mallocRuntimeIDs.txt", "a");
+        fprintf(mallocRuntimeIDs,"%lu,%lu,%lu\n",id-1,func_id,inst_id);
+        fclose(mallocRuntimeIDs);
+   }
+
+
     bool erase(uintptr_t addr) {
         std::unique_lock<std::shared_timed_mutex> ul(mutex);
         auto it = data_alive.find(addr);

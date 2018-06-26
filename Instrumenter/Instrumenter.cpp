@@ -60,7 +60,6 @@ struct Instrumenter : public FunctionPass {
                                       bool isWrite, uint32_t accessSizeArrayIndex,
                                       unsigned long funcId,
                                       unsigned long instCounter);
-
     bool runOnFunction(Function &F);
     virtual bool doInitialization(Module &M);
     virtual bool doFinalization(Module &M);
@@ -74,10 +73,12 @@ struct Instrumenter : public FunctionPass {
     DataLayout *TD;
     int LongSize;
     Function *accessCallback, *ctorFunction;
-    Type *intptrType, *int64Type, *boolType;
+    Function *modifiedMalloc;
+    Type *intptrType, *voidptrType, *int64Type, *boolType;
     InlineAsm *noopAsm;
     std::map<int, StringRef> funcNames;
     int funcCounter;
+    //FILE *fp;
 };
 
 } // namespace
@@ -119,9 +120,12 @@ bool Instrumenter::doInitialization(Module &M) {
 
     funcCounter = startFrom;
 
+    //fp = fopen("mallocFirstPass.txt", "w");
+
     context = &(M.getContext());
     LongSize = TD->getPointerSizeInBits();
     intptrType = Type::getIntNTy(*context, LongSize);
+    voidptrType = Type::getInt8PtrTy(*context);
     int64Type = Type::getInt64Ty(*context);
     boolType = Type::getInt8Ty(*context);
 
@@ -143,6 +147,10 @@ bool Instrumenter::doInitialization(Module &M) {
 
     accessCallback = checkInterfaceFunction(M.getOrInsertFunction(
         "handle_access", IRB.getVoidTy(), intptrType, int64Type, int64Type, int64Type, boolType
+    ));
+
+    modifiedMalloc = checkInterfaceFunction(M.getOrInsertFunction(
+        "malloc_inst", voidptrType, int64Type, int64Type, int64Type
     ));
     return true;
 }
@@ -256,6 +264,7 @@ bool Instrumenter::doFinalization(Module &M) {
          it != funcNames.end(); it++)
         errs() << it->first << " " << it->second << "\n";
     delete TD;
+    //fclose(fp);
     return false;
 }
 
@@ -299,7 +308,11 @@ bool Instrumenter::runOnFunction(Function &F) {
     // Fill the set of memory operations to instrument.
     unsigned long instCounter = 0;
     int NumInstrumented = 0;
+    //unsigned mallocCounter = 0;
     bool isWrite;
+    bool isMallocInstrumented = false;
+    std::vector<Instruction *> secondaryContainer;
+    std::vector<unsigned long> instCounterContainer;
     for (Function::iterator bb = F.begin(), FE = F.end(); bb != FE; ++bb) {
         for (BasicBlock::iterator ins = bb->begin(), BE = bb->end(); ins != BE;
              ++ins, ++instCounter) {
@@ -311,8 +324,42 @@ bool Instrumenter::runOnFunction(Function &F) {
                 instrumentMemoryAccess(Inst, thisFuncId, instCounter);
                 NumInstrumented++;
             }
+            if (isa<CallInst>(Inst)) {
+                StringRef name = cast<CallInst>(Inst)->getCalledFunction()->getName();
+                if (name.str() == "malloc")
+                {
+                  //fprintf(fp,"malloc,%u,%d,%lu\n",mallocCounter, thisFuncId, instCounter);
+                  //errs()<<"Malloc,"<<mallocCounter<<","<<thisFuncId<<","<<instCounter<<"\n";
+                  //mallocCounter++;
+                  secondaryContainer.push_back(Inst);
+                  instCounterContainer.push_back(instCounter);
+                  /*CallInst *instToReplace = cast<CallInst>(Inst);
+                  Value *size_arg = instToReplace->getArgOperand(0);
+                  BasicBlock::iterator ii(instToReplace);
+                  std::vector<Value *> arguments;
+                  arguments.push_back(size_arg);
+                  arguments.push_back(ConstantInt::get(int64Type, thisFuncId));
+                  arguments.push_back(ConstantInt::get(int64Type, instCounter));
+                  ReplaceInstWithInst(instToReplace->getParent()->getInstList(), ii, CallInst::Create(modifiedMalloc, ArrayRef<Value *>(arguments)));
+                  isMallocInstrumented = true;*/
+                }
+            }
         }
     }
+    for(unsigned i = 0; i < secondaryContainer.size(); i++)
+    {
+      Instruction *Inst = secondaryContainer[i];
+      unsigned long instIndex = instCounterContainer[i];
+      CallInst *instToReplace = cast<CallInst>(Inst);
+      Value *size_arg = instToReplace->getArgOperand(0);
+      BasicBlock::iterator ii(instToReplace);
+      std::vector<Value *> arguments;
+      arguments.push_back(size_arg);
+      arguments.push_back(ConstantInt::get(int64Type, thisFuncId));
+      arguments.push_back(ConstantInt::get(int64Type, instIndex));
+      ReplaceInstWithInst(instToReplace->getParent()->getInstList(), ii, CallInst::Create(modifiedMalloc, ArrayRef<Value *>(arguments)));
+      isMallocInstrumented = true;
+    }
     // If the function is modified, runOnFunction should return True.
-    return NumInstrumented > 0;
+    return NumInstrumented > 0 || isMallocInstrumented;
 }
