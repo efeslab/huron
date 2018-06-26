@@ -97,7 +97,7 @@ public:
         data_total[bt].emplace_back(start, id, size);
         id++;
         FILE *mallocRuntimeIDs = fopen("mallocRuntimeIDs.txt", "a");
-        fprintf(mallocRuntimeIDs,"%lu,%lu,%lu\n",id-1,func_id,inst_id);
+        fprintf(mallocRuntimeIDs,"%lu,%lu,%lu,%lu,%lu\n",id-1,start,size,func_id,inst_id);
         fclose(mallocRuntimeIDs);
    }
 

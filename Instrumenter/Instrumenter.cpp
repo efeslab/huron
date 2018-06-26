@@ -325,6 +325,8 @@ bool Instrumenter::runOnFunction(Function &F) {
                 NumInstrumented++;
             }
             if (isa<CallInst>(Inst)) {
+                //Inst->print(errs());
+                if(cast<CallInst>(Inst)->getCalledFunction() == NULL)continue;
                 StringRef name = cast<CallInst>(Inst)->getCalledFunction()->getName();
                 if (name.str() == "malloc")
                 {
