@@ -23,10 +23,10 @@
 
 using namespace llvm;
 
-struct PCInfo {
+struct RedirectInfo {
     /* Profile info at one program location (determined by (func, inst)) */
     std::vector<std::vector<std::pair<size_t, size_t>>> threadedFromTo;
-    PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines) {
+    RedirectInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines) {
         for (const auto &tup: lines) {
             size_t tid, from, to;
             std::tie(tid, from, to) = tup;
@@ -36,7 +36,7 @@ struct PCInfo {
         }
     }
 
-    PCInfo() = default;
+    RedirectInfo() = default;
 
     std::set<size_t> getThreads() const {
         std::set<size_t> threads;
@@ -47,11 +47,11 @@ struct PCInfo {
     }
 };
 
-struct SingleThreadPCInfo {
+struct SingleThreadRedirInfo {
     /* Profile info at one PC by one thread. */
     std::vector<std::pair<size_t, size_t>> offsets;
 
-    SingleThreadPCInfo(const PCInfo &pci, size_t tid) {
+    SingleThreadRedirInfo(const RedirectInfo &pci, size_t tid) {
         assert(pci.threadedFromTo.size() > tid);
         offsets = pci.threadedFromTo[tid];
         assert(!offsets.empty());
@@ -66,6 +66,31 @@ struct SingleThreadPCInfo {
         size_t from, to;
         std::tie(from, to) = offsets[0];
         return (long long)to - (long long)from;
+    }
+};
+
+struct PCInfo {
+    RedirectInfo ri;
+    size_t malloc;
+    bool isRedir;
+
+    PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines): ri(lines), isRedir(true) {}
+
+    PCInfo(size_t mallocSizeAdd): malloc(mallocSizeAdd), isRedir(false) {}
+
+    PCInfo(): malloc(), isRedir() {}
+
+    std::set<size_t> getThreads() const {
+        return isRedir ? ri.getThreads() : std::set<size_t>();
+    }
+
+    bool isCorrectInst(Instruction *inst) {
+        if (isRedir)
+            return isa<LoadInst>(inst) || isa<StoreInst>(inst);
+        else {
+            StringRef name = cast<CallInst>(inst)->getCalledFunction()->getName();
+            return name == "malloc" || name == "calloc" || name == "realloc";
+        }
     }
 };
 
@@ -90,22 +115,26 @@ struct RedirectPtr : public ModulePass {
 
 private:
     // Data exchange format between some functions.
-    typedef std::unordered_map<size_t, PCInfo> InstPCInfoT;
+    typedef std::unordered_map<size_t, PCInfo> InstInfoT;
 
     std::unordered_map<size_t, Instruction*> batchGetInstFromFunc(
-        Function *func, const InstPCInfoT &instInfos);
-    void duplicateFuncIfNeeded(Function *func, const InstPCInfoT &instInfos);
-    void loadLocInfo();
-    void buildThreadExpandedTable(size_t threadId, Function *newFunc, const InstPCInfoT &instInfos);
-    void offsetUnrollInst(Instruction *inst, const SingleThreadPCInfo &info);
+        Function *func, const InstInfoT &instInfos);
+    void duplicateFuncIfNeeded(Function *func, const InstInfoT &instInfos);
+    void loadProfile();
+    void loadMallocInfo(std::istream &is);
+    void loadLocInfo(std::istream &is);
+    void buildThreadExpandedTables(size_t threadId, Function *newFunc, const InstInfoT &instInfos);
+    void offsetUnrollInst(Instruction *inst, const SingleThreadRedirInfo &info);
+    void adjustMallocSize(Instruction *inst, size_t extraSize);
 
     LLVMContext *context;
-    Type *intPtrType;
+    Type *intPtrType, *sizeType;
     // Table read and parsed from input profile file.
     std::unordered_map<std::pair<size_t, size_t>, PCInfo> profileTable;
     // `instruction to its info` table. 
     // Use pointer instead of id since some functions have been copied, and index is invalid now.
-    std::unordered_map<Instruction*, SingleThreadPCInfo> threadExpandedTable; 
+    std::unordered_map<Instruction*, SingleThreadRedirInfo> redirInfo;
+    std::unordered_map<Instruction*, size_t> mallocInfo;
     // `function to its copied version and thread ids` table.
     std::unordered_map<Function*, std::vector<std::pair<Function*, size_t>>> duplicatedFunctions;
 };
@@ -120,22 +149,42 @@ static cl::opt<std::string> locfile(
     "locfile", cl::desc("Specify profile path"), cl::value_desc("filename"), cl::Required
 );
 
-void RedirectPtr::loadLocInfo() {
+void RedirectPtr::loadProfile() {
     dbgs() << "Loading from file: " << locfile << '\n';
     std::ifstream fin(locfile.c_str());
+    loadMallocInfo(fin);
+    loadLocInfo(fin);
+}
+
+void RedirectPtr::loadMallocInfo(std::istream &is) {
+    size_t n;
+    is >> n;
+    for (size_t i = 0; i < n; i++) {
+        size_t func, inst, from, to;
+        is >> func >> inst >> from >> to;
+        auto key = std::make_pair(func, inst);
+        assert(to >= from);
+        if (to == from)
+            continue;  // no change needed for this malloc
+        PCInfo value(to - from);
+        profileTable.emplace(key, std::move(value));
+    }
+}
+
+void RedirectPtr::loadLocInfo(std::istream &is) {
     size_t func, inst, n;
-    while (fin >> func >> inst >> n) {
+    while (is >> func >> inst >> n) {
         std::vector<std::tuple<size_t, size_t, size_t>> pc_lines;
         for (size_t i = 0; i < n; i++) {
             size_t tid, original, modified;
-            fin >> tid >> original >> modified;
+            is >> tid >> original >> modified;
             pc_lines.emplace_back(tid, original, modified);
         }
         auto key = std::make_pair(func, inst);
         PCInfo value(pc_lines);
         profileTable.emplace(key, std::move(value));
     }
-    // Print what is just read in to verify correctness.
+    // Print what was just read in to verify correctness.
     // for (const auto &p: profileTable) {
     //     dbgs() << p.first.first << ' ' << p.first.second << '\n';
     //     auto &vv = p.second.threadedFromTo;
@@ -158,17 +207,13 @@ bool RedirectPtr::doInitialization(Module &M) {
     DataLayout *layout = new DataLayout(&M);
     context = &(M.getContext());
     unsigned int ptrSize = layout->getPointerSizeInBits();
-    intPtrType = Type::getIntNTy(*context, ptrSize);
-    loadLocInfo();
+    sizeType = intPtrType = Type::getIntNTy(*context, ptrSize);
+    loadProfile();
     return true;
 }
 
-bool isLoadStore(Instruction *inst) {
-    return isa<LoadInst>(inst) || isa<StoreInst>(inst);
-}
-
 std::unordered_map<size_t, Instruction*> RedirectPtr::batchGetInstFromFunc(
-    Function *func, const InstPCInfoT &instInfos
+    Function *func, const InstInfoT &instInfos
 ) {
     std::unordered_map<size_t, Instruction*> ret;
     size_t instCounter = 0;
@@ -180,25 +225,31 @@ std::unordered_map<size_t, Instruction*> RedirectPtr::batchGetInstFromFunc(
     return ret;
 }
 
-void RedirectPtr::buildThreadExpandedTable(
-    size_t threadId, Function *newFunc, const InstPCInfoT &instInfos
+void RedirectPtr::buildThreadExpandedTables(
+    size_t threadId, Function *newFunc, const InstInfoT &instInfos
 ) {
-    // Add all instructions and their infos in `newFunc` into `threadExpandedTable`.
+    // Add all instructions (redirected load/store or malloc)
+    // and their infos in `newFunc` into `redirsInfo.
     // Steps:
     // 1. Find "the same instruction in the cloned function as the one in the old function"
     //    (we do this in a batch in order to traverse the newFunc only once)
-    // 2. Extract SingleThreadPCInfo from PCInfo by providing threadId.
+    // 2. Extract SingleThreadRedirInfo from RedirectInfo by providing threadId.
     // 3. With function ptr, inst ptr, info at hand, emplace them in the table.
     auto instPtrs = batchGetInstFromFunc(newFunc, instInfos);
     for (const auto &instInfoP: instInfos) {
-        SingleThreadPCInfo instThreadInfo(instInfoP.second, threadId);
         size_t instId = instInfoP.first;
         Instruction *inst = instPtrs[instId];
-        threadExpandedTable.emplace(inst, instThreadInfo);
+        if (instInfoP.second.isRedir) {
+            SingleThreadRedirInfo instThreadInfo(instInfoP.second.ri, threadId);
+            redirInfo.emplace(inst, instThreadInfo);
+        }
+        else {
+            mallocInfo.emplace(inst, instInfoP.second.malloc);
+        }
     }
 }
 
-void RedirectPtr::duplicateFuncIfNeeded(Function *func, const InstPCInfoT &instInfos) {
+void RedirectPtr::duplicateFuncIfNeeded(Function *func, const InstInfoT &instInfos) {
     // Get thread usage for each function, 
     // combined from all instructions in it.
     // If used by more than 1 threads, provide copies.
@@ -207,17 +258,19 @@ void RedirectPtr::duplicateFuncIfNeeded(Function *func, const InstPCInfoT &instI
         std::set<size_t> threads = instInfoP.second.getThreads();
         funcUserThreads.insert(threads.begin(), threads.end());
     }
-    if (funcUserThreads.size() == 1) 
-        return;
-    for (size_t tid: funcUserThreads) {
-        // name: `func` -> `func_1` (thread 1 version)
-        std::string newName = func->getName().str() + "_" + std::to_string(tid);
-        ValueToValueMapTy map;
-        Function *newFunc = CloneFunction(func, map);
-        newFunc->setName(newName);
-        duplicatedFunctions[func].emplace_back(newFunc, tid);
-        buildThreadExpandedTable(tid, newFunc, instInfos);
-    } 
+    if (funcUserThreads.size() != 1) {
+        for (size_t tid: funcUserThreads) {
+            // name: `func` -> `func_1` (thread 1 version)
+            std::string newName = func->getName().str() + "_" + std::to_string(tid);
+            ValueToValueMapTy map;
+            Function *newFunc = CloneFunction(func, map);
+            newFunc->setName(newName);
+            duplicatedFunctions[func].emplace_back(newFunc, tid);
+            buildThreadExpandedTables(tid, newFunc, instInfos);
+        }
+    }
+    else
+        buildThreadExpandedTables(*funcUserThreads.begin(), func, instInfos);
 }
 
 unsigned int getPointerOperandIndex(Instruction *inst) {
@@ -241,7 +294,7 @@ unsigned int getPointerOperandIndex(Instruction *inst) {
     assert(false);
 }
 
-void RedirectPtr::offsetUnrollInst(Instruction *inst, const SingleThreadPCInfo &info) {
+void RedirectPtr::offsetUnrollInst(Instruction *inst, const SingleThreadRedirInfo &info) {
     if (info.needUnrolling())
         return;  // TODO
     long long offset = info.getUniqueOffset();
@@ -257,11 +310,20 @@ void RedirectPtr::offsetUnrollInst(Instruction *inst, const SingleThreadPCInfo &
     inst->setOperand(index, redirectPtr);
 }
 
+void RedirectPtr::adjustMallocSize(Instruction *inst, size_t extraSize) {
+    CallInst *call = cast<CallInst>(inst);
+    Value *origSize = call->getArgOperand(0);  // size is always 0th argument in allocs.
+    IRBuilder<> IRB(inst);
+    Constant *addValue = ConstantInt::get(sizeType, extraSize, /*isSigned=*/false);
+    Value *newSize = IRB.CreateAdd(origSize, addValue);
+    call->setArgOperand(0, newSize);
+}
+
 bool RedirectPtr::runOnModule(Module &M) {
     size_t funcCounter = 0;
     for (Module::iterator fb = M.begin(), fe = M.end(); fb != fe; ++fb, ++funcCounter) {
         size_t instCounter = 0;
-        InstPCInfoT instInfos;
+        InstInfoT instInfos;
         for (Function::iterator bb = fb->begin(), be = fb->end(); bb != be; ++bb) {
             for (BasicBlock::iterator ins = bb->begin(), instE = bb->end(); ins != instE;
                 ++ins, ++instCounter) {
@@ -269,13 +331,15 @@ bool RedirectPtr::runOnModule(Module &M) {
                 auto it = profileTable.find(thisLoc);
                 if (it == profileTable.end())
                     continue;
-                assert(isLoadStore(&*ins));
+                assert(it->second.isCorrectInst(&*ins));
                 instInfos[instCounter] = it->second;
             }
         }
         this->duplicateFuncIfNeeded(&*fb, instInfos);
     }
-    for (const auto &instInfoP: threadExpandedTable)
+    for (const auto &instInfoP: redirInfo)
         this->offsetUnrollInst(instInfoP.first, instInfoP.second);
+    for (const auto &instInfoP: mallocInfo)
+        this->adjustMallocSize(instInfoP.first, instInfoP.second);
     return true;
 }
