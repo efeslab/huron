@@ -14,6 +14,8 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
+#include "Utils.h"
+
 #include <algorithm>
 #include <fstream>
 #include <set>
@@ -271,27 +273,6 @@ void RedirectPtr::duplicateFuncIfNeeded(Function *func, const InstInfoT &instInf
     }
     else
         buildThreadExpandedTables(*funcUserThreads.begin(), func, instInfos);
-}
-
-unsigned int getPointerOperandIndex(Instruction *inst) {
-    if (LoadInst *LI = dyn_cast<LoadInst>(inst)) {
-        // *isWrite = false;
-        return LI->getPointerOperandIndex();
-    }
-    if (StoreInst *SI = dyn_cast<StoreInst>(inst)) {
-        // *isWrite = true;
-        return SI->getPointerOperandIndex();
-    }
-    if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(inst)) {
-        // *isWrite = true;
-        return RMW->getPointerOperandIndex();
-    }
-    if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(inst)) {
-        // *isWrite = true;
-        return XCHG->getPointerOperandIndex();
-    }
-    errs() << "Instruction is not load/store!";
-    assert(false);
 }
 
 void RedirectPtr::offsetUnrollInst(Instruction *inst, const SingleThreadRedirInfo &info) {
