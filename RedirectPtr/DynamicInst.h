@@ -11,11 +11,11 @@ using namespace llvm;
 class InstLoadStore {
 public:
     InstLoadStore(Module &M) {
-        DataLayout dl = new DataLayout(&M);
+        DataLayout *dl = new DataLayout(&M);
         LLVMContext &context = M.getContext();
         unsigned int LongSize = dl->getPointerSizeInBits();
-        intptrType = Type::getIntNTy(*context, LongSize);
-        boolType = Type::getInt8Ty(*context);
+        intptrType = Type::getIntNTy(context, LongSize);
+        boolType = Type::getInt8Ty(context);
         redirectPtr = M.getOrInsertFunction("redirect_ptr", intptrType, intptrType, boolType);
     }
 
