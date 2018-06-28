@@ -74,8 +74,9 @@ void finalizer(void) {
     malloc_sizes.dump("malloc.txt");
 }
 
-void *my_malloc_hook(size_t size) {
+void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id) {
     void *start_ptr = __libc_malloc(size);
+    // size = round_up_size(size, cacheline_size_power);
     // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
     // RAII deactivate malloc hook so that we can use malloc below.
     HookDeactivator deactiv;
@@ -84,26 +85,12 @@ void *my_malloc_hook(size_t size) {
     if (deactiv.get_current()->index == 0) {
         // Global, single-threaded
         thread0_alloc += size;
-        malloc_sizes.insert((uintptr_t) start_ptr, size);
-    }
-    return start_ptr;
-}
-
-void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id) {
-    void *start_ptr = __libc_malloc(size);
-    // size = round_up_size(size, cacheline_size_power);
-    // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
-    // RAII deactivate malloc hook so that we can use malloc below.
-    HookDeactivator deactiv;
-    // Only record thread 0.
-    if (deactiv.get_current()->index == 0) {
-        // Global, single-threaded
         malloc_sizes.insert((uintptr_t) start_ptr, size, func_id, inst_id);
     }
     return start_ptr;
 }
 
-void *my_realloc_hook(void *ptr, size_t size) {
+void *realloc_inst(void *ptr, size_t size, uint64_t func_id, uint64_t inst_id) {
     void *new_start_ptr = __libc_realloc(ptr, size);
     // RAII deactivate malloc hook so that we can use realloc below.
     HookDeactivator deactiv;
@@ -116,30 +103,33 @@ void *my_realloc_hook(void *ptr, size_t size) {
             assert(malloc_sizes.erase((uintptr_t) ptr));
         }
         // Global, single-threaded
-        malloc_sizes.insert((uintptr_t) new_start_ptr, size);
+        malloc_sizes.insert((uintptr_t) new_start_ptr, size, func_id, inst_id);
     }
     return new_start_ptr;
 }
 
-int my_posix_memalign_hook(void **memptr, size_t alignment, size_t size) {
-    total_alloc += size;
+int posix_memalign_inst(void **memptr, size_t alignment, size_t size, 
+                        uint64_t func_id, uint64_t inst_id) {
     int code = __internal_posix_memalign(memptr, alignment, size);
     if (code)
         return code;
+    total_alloc += size;
     // RAII deactivate malloc hook so that we can use malloc below.
     HookDeactivator deactiv;
     // Only record thread 0.
     if (deactiv.get_current()->index == 0) {
         thread0_alloc += size;
         // Global, single-threaded
-        malloc_sizes.insert((uintptr_t) *memptr, size);
+        malloc_sizes.insert((uintptr_t) *memptr, size, func_id, inst_id);
     }
     return code;
 }
 
 void *malloc(size_t size) noexcept {
-    if (current && current->all_hooks_active)
-        return my_malloc_hook(size);
+    if (current && current->all_hooks_active) {
+        fprintf(stderr, "Code is visiting uninstrumented malloc/calloc.\n");
+        return malloc_inst(size, uint64_t(-1), uint64_t(-1));
+    }
     return __libc_malloc(size);
 }
 
@@ -150,14 +140,18 @@ void *calloc(size_t n, size_t size) {
 }
 
 void *realloc(void *ptr, size_t size) {
-    if (current && current->all_hooks_active)
-        return my_realloc_hook(ptr, size);
+    if (current && current->all_hooks_active) {
+        fprintf(stderr, "Code is visiting uninstrumented realloc.\n");
+        return realloc_inst(ptr, size, uint64_t(-1), uint64_t(-1));
+    }
     return __libc_realloc(ptr, size);
 }
 
 int posix_memalign(void **memptr, size_t alignment, size_t size) {
-    if (current && current->all_hooks_active)
-        return my_posix_memalign_hook(memptr, alignment, size);
+    if (current && current->all_hooks_active) {
+        fprintf(stderr, "Code is visiting uninstrumented posix_memalign.\n");
+        return posix_memalign_inst(memptr, alignment, size, uint64_t(-1), uint64_t(-1));
+    }
     return __internal_posix_memalign(memptr, alignment, size);
 }
 

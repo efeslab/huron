@@ -101,9 +101,9 @@ public:
         static void *bt_buf[1000];
         int bt_size = backtrace(bt_buf, 1000);
         std::vector<void *> bt(bt_buf, bt_buf + bt_size);
-        mutex.lock();
-        data_alive[start] = PerAddr(id, size, bt);
-        mutex.unlock();
+        lock.lock();
+        data_alive[start] = PerAddr(id, size);
+        lock.unlock();
         heap.insert(AddrSeg(start, start + size));
         data_total[bt].emplace_back(start, id, size);
         id++;
