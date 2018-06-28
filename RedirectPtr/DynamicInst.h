@@ -1,35 +1,39 @@
-#define DEBUG_TYPE "instloadstore"
-
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/IntrinsicInst.h"
 
+#include "Utils.h"
+
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace llvm;
 
 class InstLoadStore {
 public:
-    InstLoadStore(Module &M) {
-        DataLayout *dl = new DataLayout(&M);
+    explicit InstLoadStore(Module &M) {
+        layout = new DataLayout(&M);
         LLVMContext &context = M.getContext();
-        unsigned int LongSize = dl->getPointerSizeInBits();
+        unsigned int LongSize = layout->getPointerSizeInBits();
         intptrType = Type::getIntNTy(context, LongSize);
         boolType = Type::getInt8Ty(context);
-        redirectPtr = M.getOrInsertFunction("redirect_ptr", intptrType, intptrType, boolType);
+        redirectPtr = cast<Function>(M.getOrInsertFunction("redirect_ptr", intptrType, intptrType, boolType));
+        noopAsm = InlineAsm::get(
+                FunctionType::get(Type::getVoidTy(context), false),
+                StringRef(""), StringRef(""),
+                /*hasSideEffects=*/true
+        );
     }
 
-    bool dynInstFunction(Function *func, std::unordered_set<unsigned int> &locInfo) {
+    void dynInstFunction(Function *func, std::unordered_set<unsigned int> &locInfo) {
         unsigned int instCounter = 0;
         for (auto bb = func->begin(), FE = func->end(); bb != FE; ++bb) {
             for (auto ins = bb->begin(), BE = bb->end(); ins != BE; ++ins, ++instCounter) {
-                const auto &instIds = instIdsIt->second;
-                if (instIds.find(instCounter) == instIds.end())
+                if (locInfo.find(instCounter) == locInfo.end())
                     continue;
-                instrumentMemoryAccess(ins);
+                instrumentMemoryAccess(&*ins);
             }
         }
-        return true;
     }
 
 private:
@@ -40,21 +44,21 @@ private:
         arguments.push_back(addr);
         arguments.push_back(ConstantInt::get(boolType, (uint64_t)isWrite));
 
-        CallInst *Call = IRB.CreateCall(accessCallback, ArrayRef<Value *>(arguments));
+        CallInst *Call = IRB.CreateCall(redirectPtr, ArrayRef<Value *>(arguments));
 
         return Call;
     }
 
-    void InstLoadStore::instrumentMemoryAccess(Instruction *inst) {
+    void instrumentMemoryAccess(Instruction *inst) {
         bool isWrite = false;
-        unsigned int index = getPointerOperandIndex(inst, &isWrite);
+        unsigned int index = getPointerOperandIndex(inst, isWrite);
         Value *addr = inst->getOperand(index);
 
         Type *OrigPtrTy = addr->getType();
         Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
 
         assert(OrigTy->isSized());
-        uint64_t typeSize = TD->getTypeStoreSizeInBits(OrigTy);
+        uint64_t typeSize = layout->getTypeStoreSizeInBits(OrigTy);
 
         if (typeSize != 8 && typeSize != 16 && typeSize != 32 && typeSize != 64 &&
             typeSize != 128) {
@@ -73,6 +77,8 @@ private:
         IRB.CreateCall(noopAsm);
     }
 
-    Type *intptrType, boolType;
+    DataLayout *layout;
+    InlineAsm *noopAsm;
+    Type *intptrType, *boolType;
     Function *redirectPtr;
 };

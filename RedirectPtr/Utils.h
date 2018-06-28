@@ -11,6 +11,10 @@
 
 using namespace llvm;
 
+#ifndef LLVM_DEBUG
+#define LLVM_DEBUG(X) {X;}
+#endif
+
 struct PCInfo {
 private:
     struct Redirect {
@@ -130,25 +134,30 @@ typedef std::unordered_map<Instruction *, PCInfo *> PreCloneT;
 typedef std::unordered_map<Instruction *, ThreadedPCInfo> PostCloneT;
 typedef std::unordered_map<Instruction *, ExpandedPCInfo> PostUnrollT;
 
-unsigned int getPointerOperandIndex(Instruction *inst) {
+unsigned int getPointerOperandIndex(Instruction *inst, bool &isWrite) {
     if (LoadInst *LI = dyn_cast<LoadInst>(inst)) {
-        // *isWrite = false;
+        isWrite = false;
         return LI->getPointerOperandIndex();
     }
     if (StoreInst *SI = dyn_cast<StoreInst>(inst)) {
-        // *isWrite = true;
+        isWrite = true;
         return SI->getPointerOperandIndex();
     }
     if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(inst)) {
-        // *isWrite = true;
+        isWrite = true;
         return RMW->getPointerOperandIndex();
     }
     if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(inst)) {
-        // *isWrite = true;
+        isWrite = true;
         return XCHG->getPointerOperandIndex();
     }
     errs() << "Instruction is not load/store!";
     assert(false);
+}
+
+unsigned int getPointerOperandIndex(Instruction *inst) {
+    bool _dummy;
+    return getPointerOperandIndex(inst, _dummy);
 }
 
 CallInst *getCallToPThread(Function *orig) {

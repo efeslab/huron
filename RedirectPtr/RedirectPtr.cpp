@@ -26,8 +26,6 @@ namespace {
 
         void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-        DataLayout *getLayout() { return layout; }
-
         static char ID;  // Pass identification, replacement for typeid
 
     private:
