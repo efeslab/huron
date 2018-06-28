@@ -48,68 +48,65 @@ using namespace llvm;
 namespace {
 
 /// Instrumenter: instrument the memory accesses.
-struct Instrumenter : public FunctionPass {
-    Instrumenter();
-    virtual StringRef getPassName() const;
-    void instrumentMemoryAccess(Instruction *ins, unsigned long funcId,
-                                unsigned long instCounter);
-    void instrumentAddress(Instruction *origIns, IRBuilder<> &IRB, Value *addr,
-                           uint32_t typeSize, bool isWrite,
-                           unsigned long funcId, unsigned long instCounter);
-    Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
-                                      bool isWrite, uint32_t accessSizeArrayIndex,
-                                      unsigned long funcId,
-                                      unsigned long instCounter);
-    bool runOnFunction(Function &F);
-    virtual bool doInitialization(Module &M);
-    virtual bool doFinalization(Module &M);
-    virtual void getAnalysisUsage(AnalysisUsage& AU) const override;
-    static char ID; // Pass identification, replacement for typeid
+    struct Instrumenter : public ModulePass {
+        Instrumenter();
 
-  private:
-    Function *checkInterfaceFunction(Constant *FuncOrBitcast);
+        StringRef getPassName() const override;
 
-    LLVMContext *context;
-    DataLayout *TD;
-    int LongSize;
-    Function *accessCallback, *ctorFunction;
-    Function *modifiedMalloc;
-    Type *intptrType, *voidptrType, *int64Type, *boolType;
-    InlineAsm *noopAsm;
-    std::map<int, StringRef> funcNames;
-    int funcCounter;
-    //FILE *fp;
-};
+        void instrumentMemoryAccess(Instruction *ins, unsigned long funcId,
+                                    unsigned long instCounter);
+
+        void instrumentAddress(Instruction *origIns, IRBuilder<> &IRB, Value *addr,
+                               uint32_t typeSize, bool isWrite,
+                               unsigned long funcId, unsigned long instCounter);
+
+        Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
+                                          bool isWrite, uint32_t typeBytes,
+                                          unsigned long funcId,
+                                          unsigned long instCounter);
+
+        bool runOnModule(Module &M) override;
+
+        bool doInitialization(Module &M) override;
+
+        bool doFinalization(Module &M) override;
+
+        void getAnalysisUsage(AnalysisUsage &AU) const override;
+
+        static char ID; // Pass identification, replacement for typeid
+
+    private:
+        Function *checkInterfaceFunction(Constant *FuncOrBitcast);
+
+        DataLayout *TD;
+        Function *accessCallback, *modifiedMalloc;
+        Type *intptrType, *voidptrType, *int64Type, *boolType;
+        InlineAsm *noopAsm;
+    };
 
 } // namespace
 
 char Instrumenter::ID = 0;
 static RegisterPass<Instrumenter> instrumenter(
-    "instrumenter", "Instrumenting READ/WRITE pass", false, false
+        "instrumenter", "Instrumenting READ/WRITE pass", false, false
 );
-static cl::opt<int> startFrom(
-    "start-from", cl::init(0), cl::desc("Start function id from N"), cl::Hidden
+static cl::opt<unsigned> startFrom(
+        "start-from", cl::init(0), cl::desc("Start function id from N")
 );
-static cl::opt<int> maxInsPerBB(
-    "max-ins-per-bb", cl::init(10000),
-    cl::desc("maximal number of instructions to instrument in any given BB"),
-    cl::Hidden);
-static cl::opt<bool> toInstrumentStack("instrument-stack-variables",
-                                       cl::desc("instrument stack variables"),
-                                       cl::Hidden, cl::init(false));
-static cl::opt<bool> toInstrumentReads("instrument-reads",
-                                       cl::desc("instrument read instructions"),
-                                       cl::Hidden, cl::init(true));
-static cl::opt<bool>
-    toInstrumentWrites("instrument-writes",
-                       cl::desc("instrument write instructions"), cl::Hidden,
-                       cl::init(true));
+static cl::opt<bool> toInstrumentReads(
+        "instrument-reads", cl::desc("instrument read instructions"),
+        cl::Hidden, cl::init(true)
+);
+static cl::opt<bool> toInstrumentWrites(
+        "instrument-writes", cl::desc("instrument write instructions"),
+        cl::Hidden, cl::init(true)
+);
 static cl::opt<bool> toInstrumentAtomics(
-    "instrument-atomics",
-    cl::desc("instrument atomic instructions (rmw, cmpxchg)"), cl::Hidden,
-    cl::init(true));
+        "instrument-atomics", cl::desc("instrument atomic instructions (rmw, cmpxchg)"),
+        cl::Hidden, cl::init(true)
+);
 
-Instrumenter::Instrumenter() : FunctionPass(ID) {}
+Instrumenter::Instrumenter() : ModulePass(ID) {}
 
 StringRef Instrumenter::getPassName() const { return "Instrumenter"; }
 
@@ -118,45 +115,31 @@ bool Instrumenter::doInitialization(Module &M) {
     dbgs() << "\n^^^^^^^^^^^^^^^^^^Instrumenter initialization^^^^^^^^^^^^^^^^^^^^^^^^^\n";
     TD = new DataLayout(&M);
 
-    funcCounter = startFrom;
-
-    //fp = fopen("mallocFirstPass.txt", "w");
-
-    context = &(M.getContext());
-    LongSize = TD->getPointerSizeInBits();
-    intptrType = Type::getIntNTy(*context, LongSize);
-    voidptrType = Type::getInt8PtrTy(*context);
-    int64Type = Type::getInt64Ty(*context);
-    boolType = Type::getInt8Ty(*context);
-
-    // Creating the contrunctor module "instrumenter"
-    ctorFunction =
-        Function::Create(FunctionType::get(Type::getVoidTy(*context), false),
-                         GlobalValue::InternalLinkage, "instrumenter", &M);
-
-    BasicBlock *ctorBB = BasicBlock::Create(*context, "", ctorFunction);
-    Instruction *ctorinsertBefore = ReturnInst::Create(*context, ctorBB);
-
-    IRBuilder<> IRB(ctorinsertBefore);
+    LLVMContext &context = M.getContext();
+    uint32_t LongSize = TD->getPointerSizeInBits();
+    intptrType = Type::getIntNTy(context, LongSize);
+    voidptrType = Type::getInt8PtrTy(context);
+    int64Type = Type::getInt64Ty(context);
+    boolType = Type::getInt8Ty(context);
 
     // We insert an empty inline asm after __asan_report* to avoid callback
     // merge.
-    noopAsm = InlineAsm::get(FunctionType::get(IRB.getVoidTy(), false),
-                             StringRef(""), StringRef(""),
-                             /*hasSideEffects=*/true);
+    noopAsm = InlineAsm::get(FunctionType::get(Type::getVoidTy(context), false),
+                             StringRef(""), StringRef(""), /*hasSideEffects=*/true);
 
     accessCallback = checkInterfaceFunction(M.getOrInsertFunction(
-        "handle_access", IRB.getVoidTy(), intptrType, int64Type, int64Type, int64Type, boolType
+            "handle_access", Type::getVoidTy(context),
+            intptrType, int64Type, int64Type, int64Type, boolType
     ));
 
     modifiedMalloc = checkInterfaceFunction(M.getOrInsertFunction(
-        "malloc_inst", voidptrType, int64Type, int64Type, int64Type
+            "malloc_inst", voidptrType, int64Type, int64Type, int64Type
     ));
     return true;
 }
 
 
-void Instrumenter::getAnalysisUsage(AnalysisUsage& AU) const {
+void Instrumenter::getAnalysisUsage(AnalysisUsage &AU) const {
     AU.addRequired<LoopInfoWrapperPass>();
 }
 
@@ -200,7 +183,7 @@ void Instrumenter::instrumentMemoryAccess(Instruction *ins,
     Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
 
     assert(OrigTy->isSized());
-    uint32_t typeSizeBits = TD->getTypeStoreSizeInBits(OrigTy);
+    auto typeSizeBits = static_cast<uint32_t>(TD->getTypeStoreSizeInBits(OrigTy));
 
     IRBuilder<> IRB(ins);
     instrumentAddress(ins, IRB, addr, typeSizeBits >> 3, isWrite, funcId, instCounter);
@@ -219,7 +202,7 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
     arguments.push_back(ConstantInt::get(int64Type, funcId));
     arguments.push_back(ConstantInt::get(int64Type, instCounter));
     arguments.push_back(ConstantInt::get(int64Type, typeBytes));
-    arguments.push_back(ConstantInt::get(boolType, isWrite));
+    arguments.push_back(ConstantInt::get(boolType, static_cast<uint64_t>(isWrite)));
 
     CallInst *Call = IRB.CreateCall(accessCallback, ArrayRef<Value *>(arguments));
 
@@ -238,7 +221,7 @@ void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
 
     Value *actualAddr = IRB.CreatePointerCast(addr, intptrType);
 
-    dbgs() << "Generated function call: " 
+    dbgs() << "Generated function call: "
            << (isWrite ? "store" : "load")
            << " size = " << typeBytes
            << " funcId, instId = " << funcId << ", " << instCounter << "\n";
@@ -256,20 +239,16 @@ Function *Instrumenter::checkInterfaceFunction(Constant *FuncOrBitcast) {
     if (isa<Function>(FuncOrBitcast))
         return cast<Function>(FuncOrBitcast);
     report_fatal_error("trying to redefine an Instrumenter "
-                       "interface function");
+                               "interface function");
 }
 
 bool Instrumenter::doFinalization(Module &M) {
-    for (std::map<int, StringRef>::iterator it = funcNames.begin();
-         it != funcNames.end(); it++)
-        errs() << it->first << " " << it->second << "\n";
     delete TD;
-    //fclose(fp);
     return false;
 }
 
 bool isLocalVariable(Value *value) {
-    return dyn_cast<AllocaInst>(value);
+    return isa<AllocaInst>(value);
 }
 
 void printLoop(Loop *L) {
@@ -282,86 +261,61 @@ void printLoop(Loop *L) {
         errs() << "\n";
     }
     for (BasicBlock *BB : L->getBlocks()) {
-        errs() << "basicb name: "<< BB->getName() <<"\n";
+        errs() << "basicb name: " << BB->getName() << "\n";
     }
     for (Loop *SL : L->getSubLoops()) {
         printLoop(SL);
     }
 }
 
-bool Instrumenter::runOnFunction(Function &F) {
-    // If the input function is the function added by myself, don't do anything.
-    if (&F == ctorFunction)
-        return false;
-
-    // Get loop info for this function.
-    // if (!F.isDeclaration()) {
-    //     // generate the LoopInfoBase for the current function
-    //     LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-    //     for (Loop *L : LI) 
-    //         printLoop(L);
-    // }
-
-    int thisFuncId = funcCounter++;
-    funcNames.insert(std::make_pair(thisFuncId, F.getName()));
-
-    // Fill the set of memory operations to instrument.
-    unsigned long instCounter = 0;
-    int NumInstrumented = 0;
-    //unsigned mallocCounter = 0;
-    bool isWrite;
-    bool isMallocInstrumented = false;
-    std::vector<Instruction *> secondaryContainer;
-    std::vector<unsigned long> instCounterContainer;
-    for (Function::iterator bb = F.begin(), FE = F.end(); bb != FE; ++bb) {
-        for (BasicBlock::iterator ins = bb->begin(), BE = bb->end(); ins != BE;
-             ++ins, ++instCounter) {
-            Instruction *Inst = &*ins;
-            if (Value *addr = isInterestingMemoryAccess(Inst, &isWrite)) {
-                if (isLocalVariable(addr)) {
-                    continue;
-                }
-                instrumentMemoryAccess(Inst, thisFuncId, instCounter);
-                NumInstrumented++;
-            }
-            if (isa<CallInst>(Inst)) {
-                //Inst->print(errs());
-                if(cast<CallInst>(Inst)->getCalledFunction() == NULL)continue;
-                StringRef name = cast<CallInst>(Inst)->getCalledFunction()->getName();
-                if (name.str() == "malloc")
-                {
-                  //fprintf(fp,"malloc,%u,%d,%lu\n",mallocCounter, thisFuncId, instCounter);
-                  //errs()<<"Malloc,"<<mallocCounter<<","<<thisFuncId<<","<<instCounter<<"\n";
-                  //mallocCounter++;
-                  secondaryContainer.push_back(Inst);
-                  instCounterContainer.push_back(instCounter);
-                  /*CallInst *instToReplace = cast<CallInst>(Inst);
-                  Value *size_arg = instToReplace->getArgOperand(0);
-                  BasicBlock::iterator ii(instToReplace);
-                  std::vector<Value *> arguments;
-                  arguments.push_back(size_arg);
-                  arguments.push_back(ConstantInt::get(int64Type, thisFuncId));
-                  arguments.push_back(ConstantInt::get(int64Type, instCounter));
-                  ReplaceInstWithInst(instToReplace->getParent()->getInstList(), ii, CallInst::Create(modifiedMalloc, ArrayRef<Value *>(arguments)));
-                  isMallocInstrumented = true;*/
+bool Instrumenter::runOnModule(Module &M) {
+    std::map<int, StringRef> funcNames;
+    size_t funcCounter = (size_t)startFrom, numInsted = 0;
+    for (Module::iterator fb = M.begin(), fe = M.end(); fb != fe;
+         ++fb, ++funcCounter) {
+        if (&*fb == accessCallback || &*fb == modifiedMalloc)
+            continue;
+        funcNames.insert(std::make_pair(funcCounter, fb->getName()));
+        // Fill the set of memory operations to instrument.
+        unsigned long instCounter = 0;
+        std::vector<std::pair<Instruction *, size_t>> mallocLocs;
+        for (Function::iterator bb = fb->begin(), FE = fb->end(); bb != FE; ++bb) {
+            for (BasicBlock::iterator ins = bb->begin(), BE = bb->end(); ins != BE;
+                 ++ins, ++instCounter) {
+                Instruction *Inst = &*ins;
+                bool isWrite;
+                if (Value *addr = isInterestingMemoryAccess(Inst, &isWrite)) {
+                    if (isLocalVariable(addr))
+                        continue;
+                    instrumentMemoryAccess(Inst, funcCounter, instCounter);
+                    numInsted++;
+                } else if (CallInst *ci = dyn_cast<CallInst>(Inst)) {
+                    Function *callee = ci->getCalledFunction();
+                    if (!callee)
+                        continue;
+                    StringRef name = callee->getName();
+                    if (name == "malloc")
+                        mallocLocs.emplace_back(Inst, instCounter);
                 }
             }
         }
+        for (unsigned i = 0; i < mallocLocs.size(); i++) {
+            Instruction *Inst;
+            size_t instIndex;
+            std::tie(Inst, instIndex) = mallocLocs[i];
+            CallInst *instToReplace = cast<CallInst>(Inst);
+            Value *size_arg = instToReplace->getArgOperand(0);
+            BasicBlock::iterator ii(instToReplace);
+            std::vector<Value *> arguments;
+            arguments.push_back(size_arg);
+            arguments.push_back(ConstantInt::get(int64Type, funcCounter));
+            arguments.push_back(ConstantInt::get(int64Type, instIndex));
+            ReplaceInstWithInst(instToReplace->getParent()->getInstList(), ii,
+                                CallInst::Create(modifiedMalloc, ArrayRef<Value *>(arguments)));
+            numInsted++;
+        }
     }
-    for(unsigned i = 0; i < secondaryContainer.size(); i++)
-    {
-      Instruction *Inst = secondaryContainer[i];
-      unsigned long instIndex = instCounterContainer[i];
-      CallInst *instToReplace = cast<CallInst>(Inst);
-      Value *size_arg = instToReplace->getArgOperand(0);
-      BasicBlock::iterator ii(instToReplace);
-      std::vector<Value *> arguments;
-      arguments.push_back(size_arg);
-      arguments.push_back(ConstantInt::get(int64Type, thisFuncId));
-      arguments.push_back(ConstantInt::get(int64Type, instIndex));
-      ReplaceInstWithInst(instToReplace->getParent()->getInstList(), ii, CallInst::Create(modifiedMalloc, ArrayRef<Value *>(arguments)));
-      isMallocInstrumented = true;
-    }
-    // If the function is modified, runOnFunction should return True.
-    return NumInstrumented > 0 || isMallocInstrumented;
+    for (const auto &p: funcNames)
+        dbgs() << p.first << " " << p.second << "\n";
+    return numInsted > 0;
 }
