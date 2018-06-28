@@ -16,6 +16,8 @@ void finalizer(void) __attribute__((destructor));
 void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
                    size_t size, bool is_write);
 
+void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id);
+
 void store_16bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
     handle_access(addr, func_id, inst_id, 16, true);
 }
@@ -83,6 +85,20 @@ void *my_malloc_hook(size_t size) {
         // Global, single-threaded
         thread0_alloc += size;
         malloc_sizes.insert((uintptr_t) start_ptr, size);
+    }
+    return start_ptr;
+}
+
+void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id) {
+    void *start_ptr = __libc_malloc(size);
+    // size = round_up_size(size, cacheline_size_power);
+    // void *start_ptr = aligned_alloc(1 << cacheline_size_power, size);
+    // RAII deactivate malloc hook so that we can use malloc below.
+    HookDeactivator deactiv;
+    // Only record thread 0.
+    if (deactiv.get_current()->index == 0) {
+        // Global, single-threaded
+        malloc_sizes.insert((uintptr_t) start_ptr, size, func_id, inst_id);
     }
     return start_ptr;
 }
