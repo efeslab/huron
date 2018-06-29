@@ -51,7 +51,7 @@ typedef struct {
    int red[256];
    int green[256];
    int blue[256];
-   //char padding[40];
+   char padding[40];
 } thread_arg_t;
 
 /* test_endianess
