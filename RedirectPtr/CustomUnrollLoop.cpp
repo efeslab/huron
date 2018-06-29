@@ -25,6 +25,11 @@
 
 #include <unordered_map>
 
+#ifndef LLVM_DEBUG
+#define LLVM_DEBUG(X) {X;}
+#endif
+
+
 using namespace llvm;
 
 #define DEBUG_TYPE "custom-loop-unroll"
