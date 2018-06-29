@@ -54,7 +54,7 @@ static cl::opt<std::string> locfile("locfile", cl::desc("Specify profile path"),
                                     cl::value_desc("filename"), cl::Required);
 
 void RedirectPtr::loadProfile() {
-    dbgs() << "Loading from file: " << locfile << '\n';
+    dbgs() << "Loading from file: " << locfile << "\n\n";
     std::ifstream fin(locfile.c_str());
     loadMallocInfo(fin);
     loadLocInfo(fin);
@@ -67,7 +67,7 @@ void RedirectPtr::loadMallocInfo(std::istream &is) {
         size_t func, inst, from, to;
         is >> func >> inst >> from >> to;
         auto key = std::make_pair(func, inst);
-        assert(to >= from);
+        assert(to >= from && "Malloc size becomes smaller after padding?");
         if (to == from) continue;  // no change needed for this malloc
         PCInfo value(to - from);
         profile.emplace(key, std::move(value));
@@ -151,10 +151,12 @@ bool RedirectPtr::runOnModule(Module &M) {
     // Expand functions thread-wise
     // and use pointer to locate objects (instead of offset)
     size_t funcCounter = 0;
+    dbgs() << "Searching for instructions:\n";
     for (Module::iterator fb = M.begin(), fe = M.end(); fb != fe;
          ++fb, ++funcCounter) {
         size_t instCounter = 0;
         PreCloneT instInfos;
+        dbgs() << funcCounter << ' ' << fb->getName() << '\n';
         for (Function::iterator bb = fb->begin(), be = fb->end(); bb != be;
              ++bb) {
             for (BasicBlock::iterator ins = bb->begin(), instE = bb->end();
@@ -162,6 +164,7 @@ bool RedirectPtr::runOnModule(Module &M) {
                 auto thisLoc = std::make_pair(funcCounter, instCounter);
                 auto it = profile.find(thisLoc);
                 if (it == profile.end()) continue;
+                ins->dump();
                 assert(it->second.isCorrectInst(&*ins));
                 instInfos[&*ins] = &(it->second);
             }
@@ -170,7 +173,8 @@ bool RedirectPtr::runOnModule(Module &M) {
             continue;
         this->duplicateFuncIfNeeded(&*fb, instInfos);
     }
-
+    
+    dbgs() << "\nWorking on functions.\n";
     for (auto &p: absPosProfile) {
         GroupFuncLoop funcPass(this, this->context, this->layout, p.second);
         funcPass.runOnFunction(*p.first);

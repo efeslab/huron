@@ -17,6 +17,8 @@ public:
     }
 
     void runOnFunction(Function &func) {
+        dbgs() << "Working on function " << func.getName() << '\n';
+        dbgs() << "  Gathering the loops.\n";
         LoopInfo *li = &(pass->getAnalysis<LoopInfoWrapperPass>(func).getLoopInfo());
         getAllLoops(func, li);
         for (const auto &p: unrollInsts) {
@@ -24,6 +26,7 @@ public:
             PostUnrollT unrolled = pass.runOnInstGroup(p.second);
             finalTable.insert(unrolled.begin(), unrolled.end());
         }
+        dbgs() << "  Processing instructions.\n";
         size_t c = 0, m = 0, o = 0;
         for (const auto &p2: finalTable) {
             ActionType action(p2.second);
@@ -42,7 +45,7 @@ public:
                     break;
             }
         }
-        dbgs() << "(c, m, o) = (" << c << ", " << m << ", " << o << "), in function " << func.getName() << '\n';
+        dbgs() << "  (c, m, o) = (" << c << ", " << m << ", " << o << ")\n";
     }
 
 private:
@@ -82,7 +85,7 @@ private:
             if (p.second.getSize() != 1) {
                 BasicBlock *bb = p.first->getParent();
                 Loop *loop = li->getLoopFor(bb);
-                assert(loop);
+                assert(loop && "A multiple-offset inst is not directly in a loop");
                 unrollInsts[loop].emplace(p.first, p.second);
             } else
                 finalTable.emplace(p.first, ExpandedPCInfo(p.second, 0));

@@ -19,7 +19,7 @@ public:
     PostUnrollT runOnInstGroup(const PostCloneT &insts) {
         Loop *loop = inferLoop(insts);
         size_t count = getLoopUnrollCount(insts);
-        dbgs() << "unrolling the following loop for " << count << " times: \n";
+        dbgs() << "  Unrolling the following loop for " << count << " times: \n    ";
         loop->dump();
         for (const auto &p: insts)
             hook.emplace(p.first, std::vector<Instruction *>());
@@ -42,11 +42,13 @@ private:
         TargetTransformInfo transinfo(*layout);
         bool rotated = LoopRotation(loop, li, &transinfo, &cache, nullptr,
                                     nullptr, query, true, unsigned(-1), true);
-        assert(rotated);
+        if (!rotated)
+            dbgs() << "Warning: loop is not rotated. The following loop unroll may fail.\n";
         // Subscribe to instuction clone information for instructions of interest,
         // and then do the unrolling.
         CustomLoopUnrollResult result = DefaultUnrollLoop(loop, count, count, li, &cache, hook);
-        assert(result == CustomLoopUnrollResult::FullyUnrolled);
+        assert(result == CustomLoopUnrollResult::FullyUnrolled &&
+               "Loop unrolling failed");
     }
 
     Loop *inferLoop(const PostCloneT &insts) const {
@@ -58,13 +60,21 @@ private:
     size_t getLoopUnrollCount(const PostCloneT &insts) const {
         bool compare = false;
         size_t size;
+        Instruction *inst;
         for (const auto &instP : insts) {
             size_t nextSize = instP.second.getSize();
             if (!compare) {
                 size = nextSize;
+                inst = instP.first;
                 compare = true;
-            } else
-                assert(size == nextSize);
+            } else if (size != nextSize) {
+                errs() << "  In function " << parent->getName() << ", "
+                       << "the instructions below have loop unrolling count "
+                       << size << " and " << nextSize << " respectively:\n";
+                inst->dump();
+                instP.first->dump();
+                assert(false);
+            }
         }
         return size;
     }
