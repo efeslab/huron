@@ -15,7 +15,7 @@
 using std::experimental::string_view;
 using namespace std;
 
-const int CACHELINE = 64, CACHELINE_BIT = 6;
+const int CACHELINE_BIT = 6;
 
 template<class T>
 inline void hash_combine(std::size_t &s, const T &v) {

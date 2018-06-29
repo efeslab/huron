@@ -134,13 +134,42 @@ struct Record {
     }
 };
 
+struct MallocInfo {
+    size_t id, start, size;
+    PC pc;
+
+    MallocInfo() : id(0), start(0), size(0), pc(0, 0) {}
+
+    friend istream &operator>>(istream &is, MallocInfo &mal) {
+        static CSVParser csv(5);
+        static string line;
+        getline(is, line);
+        if (line.empty())
+            return is;
+        const auto &fields = csv.read_csv_line(line);
+        mal.id = to_unsigned<size_t>(fields[0]);
+        mal.start = to_unsigned<size_t>(fields[1]);
+        mal.size = to_unsigned<size_t>(fields[2]);
+        mal.pc.func = to_unsigned<uint16_t>(fields[3]);
+        mal.pc.inst = to_unsigned<uint16_t>(fields[4]);
+        return is;
+    }
+
+    bool operator<(const MallocInfo &rhs) const {
+        return id < rhs.id;
+    }
+};
+
 class AddrRecord {
 public:
+    friend class MallocStorageT;
+
     AddrRecord(Segment _range, int m_id, size_t m_start, const vector<Record> &records) :
             range(_range), malloc_start(m_start), malloc_id(m_id) {
         for (const auto &rec: records) {
             thread_rw[rec.thread] += rec.rw;
             pc_rw[rec.pc] += rec.rw;
+            pc_threads.emplace(rec.pc, rec.thread);
         }
     }
 
@@ -199,17 +228,14 @@ public:
         return range < rhs.range;
     }
 
-    void emit_api_output(ostream &os) const {
-        os << range.start << ' ' << (range.end - range.start) << ' '
-           << thread_rw.size() << ' ';
-        for (const auto &p2: thread_rw)
-            os << p2.first << ' ' << p2.second.r << ' ' << p2.second.w << ' ';
-        os << '\n';
-    }
+    pair<size_t, size_t> get_start_size() const {
+        return {range.start, (range.end - range.start)};
+    };
 
 private:
     unordered_map<uint32_t, RW> thread_rw;
     unordered_map<PC, RW> pc_rw;
+    unordered_multimap<PC, uint32_t> pc_threads;
     Segment range;
     size_t malloc_start;
     int malloc_id;
@@ -302,21 +328,26 @@ public:
 
     MallocStorageT(MallocStorageT &&) = default;
 
-    MallocStorageT() : malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(0) {}
+    MallocStorageT() : minfo(), malloc_fs(0), m_id(0) {}
 
-    explicit MallocStorageT(int _m_id, size_t _m_start, const unordered_map<Segment, vector<Record>> &bucket,
-                            size_t graph_threshold) :
-            malloc_fs(0), n_records(0), max_malloc_offset(0), m_id(_m_id) {
-        find_overlap(_m_id, _m_start, bucket);
+    explicit MallocStorageT(
+            int _m_id, const MallocInfo &_m,
+            const unordered_map<Segment, vector<Record>> &bucket,
+            size_t graph_threshold
+    ) :
+            minfo(_m), malloc_fs(0), m_id(_m_id) {
+        size_t m_start = _m.start;
+        find_overlap(_m_id, m_start, bucket);
         for (const auto &p: bucket) {
-            Segment seg = p.first.subtract_by(_m_start);
-            records.emplace_back(seg, _m_id, _m_start, p.second);
-            for (const auto &rec: p.second) {
-                if (rec.m_offset != -1)
-                    max_malloc_offset = max(max_malloc_offset, size_t(rec.m_offset));
-                all_pcs.insert(rec.pc);
-            }
+            Segment seg = p.first.subtract_by(m_start);
+            records.emplace_back(seg, _m_id, m_start, p.second);
         }
+        calc_graphs(graph_threshold);
+        get_fixed_layout();
+    }
+
+    void calc_graphs(size_t threshold) {
+        map<size_t, vector<AddrRecord>> cachelines;
         for (const auto &rec: records) {
             auto cls = rec.cachelines();
             assert(cls.first <= cls.second);
@@ -325,10 +356,6 @@ public:
         }
         for (auto &p: cachelines)
             sort(p.second.begin(), p.second.end());
-        calc_graphs(graph_threshold);
-    }
-
-    void calc_graphs(size_t threshold) {
         graphs.reserve(cachelines.size());
         for (const auto &pair: cachelines)
             graphs.emplace_back(pair);
@@ -355,15 +382,53 @@ public:
         return os;
     }
 
-    void emit_api_output(ostream &os) const {
-        os << m_id << '\n';
-        os << all_pcs.size() << '\n';
-        for (const PC &pc: all_pcs)
-            os << pc.func << ' ' << pc.inst << '\n';
-        os << max_malloc_offset << '\n';
-        os << n_records << '\n';
+    multimap<PC, tuple<size_t, size_t, size_t>> get_pc_grouped_layout() const {
+        multimap<PC, pair<uint32_t, size_t>> pcs;
         for (const auto &rec: records)
-            rec.emit_api_output(os);
+            for (const auto &pc_th: rec.pc_threads)
+                pcs.emplace(pc_th.first, make_pair(pc_th.second, rec.range.start));
+        multimap<PC, tuple<size_t, size_t, size_t>> ret;
+        for (const auto &p: pcs) {
+            uint32_t thread;
+            size_t start;
+            tie(thread, start) = p.second;
+            auto it = offsets.find(start);
+            assert(it != offsets.end());
+            size_t mapped = it->second;
+            ret.emplace(p.first, make_tuple(thread, start, mapped));
+        }
+        return ret;
+    }
+
+    void get_fixed_layout() {
+        map<int, vector<size_t>> threadIds;
+        for (const auto &rec: records) {
+            int bitMask = 0;
+            size_t start, size;
+            tie(start, size) = rec.get_start_size();
+            vector<bool> threads = rec.get_thread_ids();
+            for (size_t j = 0; j < threads.size(); j++)
+                bitMask |= threads[j] ? (1 << j) : 0;
+            for (size_t k = 0; k < size; k++)
+                threadIds[bitMask].push_back(start + k);
+        }
+        size_t offset = 0, maxOffset = 0;
+        for (auto &threadId : threadIds) {
+            if (offset != 0)
+                offset += 64;
+            for (size_t currentIndex : threadId.second) {
+                offsets[currentIndex] = offset;
+                if (currentIndex > maxOffset)
+                    maxOffset = currentIndex;
+                offset += 1;
+            }
+        }
+        after_mapped = offset;
+    }
+
+    void print_fixed_malloc(ostream &os) const {
+        os << minfo.pc.func << ' ' << minfo.pc.inst << ' ' << minfo.size
+           << ' ' << after_mapped << '\n';
     }
 
 private:
@@ -377,64 +442,93 @@ private:
         }
     }
 
-    map<size_t, vector<AddrRecord>> cachelines;
     vector<AddrRecord> records;
     vector<Graph> graphs;
-    set<PC> all_pcs;
-    size_t malloc_fs, n_records, max_malloc_offset;
+    map<size_t, size_t> offsets;
+    MallocInfo minfo;
+    size_t malloc_fs, after_mapped;
     int m_id;
 };
 
-map<int, MallocStorageT> compute_from_log(ifstream &file, size_t graph_threshold) {
+map<int, MallocStorageT> compute_from_log(ifstream &logf, ifstream &mf, size_t graph_threshold) {
     map<int, unordered_map<Segment, vector<Record>>> bins;
-    map<int, size_t> malloc_start;
+    map<int, MallocInfo> mallocs;
     map<int, MallocStorageT> ret;
-    Record next;
+    Record next_r;
+    MallocInfo next_m;
+    while (mf >> next_m)
+        mallocs[next_m.id] = next_m;
     size_t i = 0;
-    while (file >> next) {
+    while (logf >> next_r) {
         if (!(i++ % 10000))
             cout << "line of log read: " << i - 1 << endl;
-        auto key = Segment(next.addr, next.addr + next.size);
-        bins[next.m_id][key].push_back(next);
-        malloc_start.emplace(next.m_id, next.addr - next.m_offset);
+        auto key = Segment(next_r.addr, next_r.addr + next_r.size);
+        bins[next_r.m_id][key].push_back(next_r);
     }
+    cout << "line of log read: " << i - 1 << endl;
     i = 0;
     for (const auto &p: bins) {
         if (!(i++ % 1000))
             cout << "# of mallocs processed: " << i - 1 << '/' << bins.size() << endl;
-        MallocStorageT malloc_t(p.first, malloc_start[p.first], p.second, graph_threshold);
+        MallocStorageT malloc_t(p.first, mallocs[p.first], p.second, graph_threshold);
         if (!malloc_t.empty())
             ret.emplace(p.first, move(malloc_t));
     }
+    cout << "# of mallocs processed: " << bins.size() << '/' << bins.size() << endl;
     return ret;
 }
 
+void print_pc_trans_table(ostream &os,
+                          const multimap<PC, tuple<size_t, size_t, size_t>> &all_pcs_layout) {
+    typedef tuple<size_t, size_t, size_t> LayoutT;
+    map<PC, vector<LayoutT>> pc_grouped;
+    for (const auto &pc_layout: all_pcs_layout)
+        pc_grouped[pc_layout.first].push_back(pc_layout.second);
+    for (auto &pc_layout: pc_grouped) {
+        sort(pc_layout.second.begin(), pc_layout.second.end(),
+             [](const LayoutT &l, const LayoutT &r) { return get<1>(l) < get<1>(r); } );
+        os << pc_layout.first.func << ' ' << pc_layout.first.inst << ' '
+           << pc_layout.second.size() << '\n';
+        for (const auto &layout: pc_layout.second)
+            os << get<0>(layout) << ' ' << get<1>(layout) << ' ' << get<2>(layout) << '\n';
+    }
+}
+
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        cerr << "Usage: " << argv[0] << " LOGFILE" << endl;
+    if (argc < 3 || argc > 5) {
+        cerr << "Usage: " << argv[0] << " logfile output [threshold] [mallocfile]" << endl;
         return 1;
     }
-    string path = argv[1];
-    ifstream file(path);
-    if (file.fail())
+    string log_path = argv[1], out_path = argv[2];
+    string malloc_path = argc == 5 ? argv[4] : "mallocRuntimeIDs.txt";
+    ifstream log_file(log_path), malloc_file(malloc_path);
+    if (log_file.fail() || malloc_file.fail()) {
+        cerr << "Can't open file\n";
         return 1;
+    }
     std::ios_base::sync_with_stdio(false);
-    size_t threshold = (argc == 3) ? stoul(argv[2]) : 100;
+    size_t threshold = (argc >= 4) ? stoul(argv[3]) : 100;
 
-    auto groups = compute_from_log(file, threshold);
-    ofstream graphs_stream(insert_suffix(path, "_summary"));
-    ofstream api_stream(insert_suffix(path, "_output"));
-    ofstream stats_stream(insert_suffix(path, "_fs_malloc"));
+    auto groups = compute_from_log(log_file, malloc_file, threshold);
+    ofstream graphs_stream(insert_suffix(log_path, "_summary"));
+    ofstream stats_stream(insert_suffix(log_path, "_fs_malloc"));
+    ofstream layout_stream(out_path);
+
     size_t n_mallocs = 0;
     map<size_t, size_t> fs_cl_ordering;
+    multimap<PC, tuple<size_t, size_t, size_t>> all_pcs_layout;
 
-    api_stream << groups.size() << '\n';
+    layout_stream << groups.size() << '\n';
     for (const auto &pair: groups) {
         n_mallocs++;
         fs_cl_ordering.emplace(pair.second.get_n_false_sharing(), pair.first);
         graphs_stream << pair.second;
-        pair.second.emit_api_output(api_stream);
+        auto layout = pair.second.get_pc_grouped_layout();
+        all_pcs_layout.insert(layout.begin(), layout.end());
+        pair.second.print_fixed_malloc(layout_stream);
     }
+
+    print_pc_trans_table(layout_stream, all_pcs_layout);
 
     for (auto it = fs_cl_ordering.rbegin(); it != fs_cl_ordering.rend(); it++)
         stats_stream << '#' << it->first << '@' << it->second << '\n';
