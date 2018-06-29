@@ -30,16 +30,6 @@ size_t remove_erase_count_if(ContainerT &items, const PredicateT &predicate) {
     return old_size - items.size();
 }
 
-template<typename ContainerT, typename PredicateT>
-size_t erase_count_if(ContainerT &items, const PredicateT &predicate) {
-    size_t old_size = items.size();
-    for (auto it = items.begin(); it != items.end();) {
-        if (predicate(*it)) it = items.erase(it);
-        else ++it;
-    }
-    return old_size - items.size();
-}
-
 string insert_suffix(const string &path, const string &suffix) {
     size_t slash = path.rfind('/');
     slash = slash == string::npos ? 0 : slash + 1;
@@ -91,19 +81,28 @@ namespace std {
             return seed;
         }
     };
+
+    template<typename T1, typename T2>
+    struct hash<std::pair<T1, T2>> {
+        std::size_t operator()(const std::pair<T1, T2> &x) const {
+            return std::hash<T1>()(x.first) ^ std::hash<T2>()(x.second);
+        }
+    };
 }
 
 struct CSVParser {
     vector<string_view> fields;
     char delim;
-    explicit CSVParser(size_t n_fields, char _delim = ','): fields(n_fields), delim(_delim) {}
+
+    explicit CSVParser(size_t n_fields, char _delim = ',') : fields(n_fields), delim(_delim) {}
+
     inline const vector<string_view> &read_csv_line(const string &line) {
         size_t start = 0, end = 0;
         for (auto &field : fields) {
             if (end == string::npos)
                 throw invalid_argument("csv malformed");
             void *end_ptr = memchr(line.data() + start, delim, line.length() - start);
-            end = end_ptr ? (char*)end_ptr - line.data() : string::npos;
+            end = end_ptr ? (char *) end_ptr - line.data() : string::npos;
             field = string_view(line).substr(start, end - start);
             start = end + 1;
         }
@@ -112,7 +111,7 @@ struct CSVParser {
 };
 
 
-template <typename T>
+template<typename T>
 inline T to_unsigned(const string_view &str) {
     T val = 0;
     for (char i: str)
@@ -120,7 +119,7 @@ inline T to_unsigned(const string_view &str) {
     return val;
 }
 
-template <typename T>
+template<typename T>
 inline T to_signed(const string_view &str) {
     T val = 0;
     bool negative = str.front() == '-';
