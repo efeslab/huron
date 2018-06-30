@@ -86,6 +86,8 @@ private:
                 BasicBlock *bb = p.first->getParent();
                 Loop *loop = li->getLoopFor(bb);
                 assert(loop && "A multiple-offset inst is not directly in a loop");
+                while (Loop *parent = loop->getParentLoop())
+                    loop = parent;
                 unrollInsts[loop].emplace(p.first, p.second);
             } else
                 finalTable.emplace(p.first, ExpandedPCInfo(p.second, 0));

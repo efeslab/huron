@@ -54,7 +54,10 @@ private:
     Loop *inferLoop(const PostCloneT &insts) const {
         assert(!insts.empty());
         BasicBlock *sampleBB = insts.begin()->first->getParent();
-        return li->getLoopFor(sampleBB);
+        Loop *loop = li->getLoopFor(sampleBB);
+        while (Loop *parent = loop->getParentLoop())
+            loop = parent;
+        return loop;
     }
 
     size_t getLoopUnrollCount(const PostCloneT &insts) const {
