@@ -454,9 +454,11 @@ public:
             thread_affinity.insert(merging_stack.top());
             merging_stack.pop();
         }
-        unordered_map<size_t, vector<Segment>> thread_grouped;
+        map<size_t, vector<Segment>> thread_grouped;
         for (const auto &p: thread_affinity)
             thread_grouped[p.second].push_back(p.first);
+        for (auto &p: thread_grouped)
+            sort(p.second.begin(), p.second.end());
         size_t offset = 0;
         for (const auto &p : thread_grouped) {
             if (offset != 0)
@@ -489,7 +491,7 @@ private:
     vector<AddrRecord> records;
     vector<Graph> graphs;
     map<Segment, Segment> remappings;
-    unordered_map<pair<PC, uint32_t>, vector<Segment>> access_relation;
+    map<pair<PC, uint32_t>, vector<Segment>> access_relation;
     MallocInfo minfo;
     size_t malloc_fs, after_mapped;
     int m_id;
