@@ -75,7 +75,7 @@ struct Segment {
     }
 
     bool operator<(const Segment &rhs) const {
-        return start < rhs.start;
+        return start < rhs.start || (start == rhs.start && end < rhs.end);
     }
 
     bool overlap(const Segment &rhs) const {
@@ -238,6 +238,10 @@ public:
                 if (exclude_threads.size() <= p.first || !exclude_threads[p.first])
                     ret += p.second;
         return ret;
+    }
+
+    bool operator==(const AddrRecord &rhs) const {
+        return range == rhs.range;
     }
 
     bool operator<(const AddrRecord &rhs) const {
@@ -405,11 +409,12 @@ public:
             const PC &pc = p.first.first;
             uint32_t thread = p.first.second;
             for (const auto &seg: p.second) {
-                auto it = remappings.upper_bound(seg);  // Dummy segment
+                auto it = remappings.upper_bound(seg.start);
                 assert(it != remappings.begin());
                 it--;
-                assert(seg.start >= it->first.start && seg.end <= it->first.end);
-                size_t mapped = seg.start - it->first.start + it->second.start;
+                size_t size = it->second.end - it->second.start;
+                assert(seg.start >= it->first && seg.end <= it->first + size);
+                size_t mapped = seg.start - it->first + it->second.start;
                 ret.emplace(pc, make_tuple(thread, seg.start, mapped));
             }
         }
@@ -465,7 +470,7 @@ public:
                 offset += 1 << CACHELINE_BIT;
             for (const auto &seg: p.second) {
                 Segment map_to(offset, offset + seg.end - seg.start);
-                this->remappings[seg] = map_to;
+                this->remappings[seg.start] = map_to;
                 offset = map_to.end;
             }
         }
@@ -490,7 +495,7 @@ private:
 
     vector<AddrRecord> records;
     vector<Graph> graphs;
-    map<Segment, Segment> remappings;
+    map<size_t, Segment> remappings;
     map<pair<PC, uint32_t>, vector<Segment>> access_relation;
     MallocInfo minfo;
     size_t malloc_fs, after_mapped;
