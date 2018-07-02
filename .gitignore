@@ -7,6 +7,9 @@ cmake-build-release/
 # Outputs
 *.log
 *.csv
+*.txt
+!CMakeLists.txt
+output/
 
 # Temp files of NTFS filesystem
 .fuse*
@@ -15,10 +18,10 @@ cmake-build-release/
 *.so
 *.o
 *.bc
-tensor
-!tensor/
-false
-!false/
+bin/
+
+# Alternative config for histogram
+test_suites/histogram/custom/
 
 experimental/
 boost_*/
