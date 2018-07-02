@@ -304,7 +304,7 @@ int main(int argc, char *argv[])
 #line 224
 
 #line 224
-	for (i = 0; i < (P) - 1; i++) {
+	for (i = 0; i < (P); i++) {
 #line 224
 		Error = pthread_create(&PThreadTable[i], NULL, (void * (*)(void *))(SlaveStart), NULL);
 #line 224
@@ -320,14 +320,14 @@ int main(int argc, char *argv[])
 #line 224
 
 #line 224
-	SlaveStart();
+	// SlaveStart();
 #line 224
 };
   {
 #line 225
 	unsigned long	i, Error;
 #line 225
-	for (i = 0; i < (P) - 1; i++) {
+	for (i = 0; i < (P); i++) {
 #line 225
 		Error = pthread_join(PThreadTable[i], NULL);
 #line 225
