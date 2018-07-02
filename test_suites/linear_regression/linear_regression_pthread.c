@@ -64,7 +64,7 @@ typedef struct
 void *linear_regression_pthread(void *args_in) 
 {
    lreg_args* args =(lreg_args*)args_in;
-   int i;
+   int i, j;
 
    args->SX = 0;
    args->SXX = 0;
@@ -73,6 +73,7 @@ void *linear_regression_pthread(void *args_in)
    args->SXY = 0;
 
     // ADD UP RESULTS
+   for(j=0; j <100; j++){
    for (i = 0; i < args->num_elems; i++)
    {
       //Compute SX, SY, SYY, SXX, SXY
@@ -81,6 +82,7 @@ void *linear_regression_pthread(void *args_in)
       args->SY  += args->points[i].y;
       args->SYY += args->points[i].y*args->points[i].y;
       args->SXY += args->points[i].x*args->points[i].y;
+   }
    }
 
    return (void *)0;
@@ -94,7 +96,7 @@ int main(int argc, char *argv[])
    char * fname;
    struct stat finfo;
     
-   int req_units, num_threads, num_procs = 8, i;
+   int req_units, num_threads, num_procs = 4, i;
    pthread_attr_t attr;
    lreg_args* tid_args;
 
@@ -136,14 +138,17 @@ int main(int argc, char *argv[])
    memset(tid_args, 0, sizeof(lreg_args)*num_procs);
 
 	 // Assign a portion of the points for each thread
+   pthread_t tmps[8];
    for(i = 0; i < num_threads; i++)
    {
 	   tid_args[i].points = &points[i*req_units];
 	   tid_args[i].num_elems = req_units;
+     tmps[i] = tid_args[i].tid;
 	   if(i == (num_threads - 1))
 			tid_args[i].num_elems = n - i*req_units;
 
-	   CHECK_ERROR(pthread_create(&tid_args[i].tid, &attr, linear_regression_pthread, (void*)&tid_args[i]) != 0);
+	   CHECK_ERROR(pthread_create(&tmps[i], &attr, linear_regression_pthread, (void *)&tid_args[i]) != 0);
+     tid_args[i].tid = tmps[i];
    }
 
    long long SX_ll = 0, SY_ll = 0, SXX_ll = 0, SYY_ll = 0, SXY_ll = 0;

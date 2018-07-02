@@ -211,7 +211,7 @@ int main(int argc, char *argv[]) {
    excess = num_pixels % num_procs;
    
    CHECK_ERROR( (pid = (pthread_t *)malloc(sizeof(pthread_t) * num_procs)) == NULL);
-   CHECK_ERROR( (arg = (thread_arg_t *)malloc(sizeof(thread_arg_t)* num_procs)) == NULL);
+   CHECK_ERROR( (arg = (thread_arg_t *)aligned_alloc(64, sizeof(thread_arg_t)* num_procs)) == NULL);
    memset(arg, 0, sizeof(thread_arg_t)*num_procs);
    //printf("%p\n",arg);
    
