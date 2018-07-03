@@ -100,11 +100,13 @@ extern "C" {
     return ptr;
   }
 
+  void *__libc_malloc(size_t size);
+
   /// Functions related to memory management.
   void * sheriff_malloc (size_t sz) {
     void * ptr;
     if (!initialized) {
-      ptr = tempmalloc(sz);
+      ptr = __libc_malloc(sz); // tempmalloc(sz);
     } else {
       ptr = xrun::getInstance().malloc (sz);
     }

@@ -73,17 +73,17 @@ extern "C" {
   void (* __MALLOC_HOOK_VOLATILE __malloc_initialize_hook) (void) = my_init_hook;
 
   static void my_init_hook (void) {
-    // Store the old hooks.
-    old_malloc_hook = __malloc_hook;
-    old_free_hook = __free_hook;
-    old_realloc_hook = __realloc_hook;
-    old_memalign_hook = __memalign_hook;
+    // // Store the old hooks.
+    // old_malloc_hook = __malloc_hook;
+    // old_free_hook = __free_hook;
+    // old_realloc_hook = __realloc_hook;
+    // old_memalign_hook = __memalign_hook;
 
-    // Point the hooks to the replacement functions.
-    __malloc_hook = my_malloc_hook;
-    __free_hook = my_free_hook;
-    __realloc_hook = my_realloc_hook;
-    __memalign_hook = my_memalign_hook;
+    // // Point the hooks to the replacement functions.
+    // __malloc_hook = my_malloc_hook;
+    // __free_hook = my_free_hook;
+    // __realloc_hook = my_realloc_hook;
+    // __memalign_hook = my_memalign_hook;
 
   }
 

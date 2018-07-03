@@ -87,7 +87,7 @@ public:
 #ifdef X86_32BIT
   enum { PROTECTEDHEAP_SIZE = 1048576UL * 800 };
 #else
-  enum { PROTECTEDHEAP_SIZE = 1048576UL * 8192 };
+  enum { PROTECTEDHEAP_SIZE = 1048576UL * 2048 };
 #endif
   enum { SHAREDHEAP_SIZE = 1048576UL * 100 };
 

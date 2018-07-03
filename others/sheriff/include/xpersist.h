@@ -78,7 +78,8 @@ public:
     }
     
     // Get a temporary file name (which had better not be NFS-mounted...).
-    char _backingFname[L_tmpnam];
+    char _backingFname[100];
+    // printf("L_tmpnam = %d\n", L_tmpnam);
     sprintf (_backingFname, "/tmp/sheriff-backing-XXXXXX");
     _backingFd = mkstemp (_backingFname);
     if (_backingFd == -1) {
