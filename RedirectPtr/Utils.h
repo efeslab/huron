@@ -6,8 +6,8 @@
 #define LLVM_UTILS_H
 
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/IRBuilder.h"
 #include <cassert>
-#include <llvm/IR/IRBuilder.h>
 
 using namespace llvm;
 
@@ -15,122 +15,149 @@ using namespace llvm;
 #define LLVM_DEBUG(X) {X;}
 #endif
 
-struct PCInfo {
-private:
-    struct Redirect {
-        /* Profile info at one program location (determined by (func, inst)) */
-        std::vector<std::vector<std::pair<size_t, size_t>>> allRedirects;
-
-        explicit Redirect(const std::vector<std::tuple<size_t, size_t, size_t>> &lines) {
-            for (const auto &tup : lines) {
-                size_t tid, from, to;
-                std::tie(tid, from, to) = tup;
-                if (allRedirects.size() <= tid) allRedirects.resize(tid + 1);
-                allRedirects[tid].emplace_back(from, to);
-            }
-            for (auto &vec: allRedirects)
-                std::sort(vec.begin(), vec.end());
-        }
-
-        Redirect() = default;
-
-        std::set<size_t> getThreads() const {
-            std::set<size_t> threads;
-            for (size_t i = 0; i < allRedirects.size(); i++)
-                if (!allRedirects[i].empty()) threads.insert(i);
-            return threads;
-        }
-    };
-
+class PCInfo {
 public:
     explicit PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines)
-            : ri(new Redirect(lines)) {}
+            : malloc(), isFirst(true) {
+        for (const auto &tup : lines) {
+            size_t tid, from, to;
+            std::tie(tid, from, to) = tup;
+            allRedirects[tid].emplace_back(from, to);
+        }
+        for (auto &p: allRedirects)
+            std::sort(p.second.begin(), p.second.end());
+    }
 
-    explicit PCInfo(size_t mallocSizeAdd) : malloc(new size_t(mallocSizeAdd)) {}
+    explicit PCInfo(size_t mallocSizeAdd) :
+            allRedirects(), malloc(mallocSizeAdd), isFirst(false) {}
 
     PCInfo() = default;
 
     std::set<size_t> getThreads() const {
-        return ri ? ri->getThreads() : std::set<size_t>();
+        if (isFirst) {
+            std::set<size_t> threads;
+            for (const auto &p: allRedirects)
+                threads.insert(p.first);
+            return threads;
+        } else return std::set<size_t>();
     }
 
-    size_t getSize(size_t tid) const {
-        if (ri) {
-            assert(ri->allRedirects.size() > tid);
-            return ri->allRedirects[tid].size();
-        } else
-            return 1;
-    }
-
-    bool isCorrectInst(Instruction *inst) {
-        if (malloc) {
+    bool isCorrectInst(Instruction *inst) const {
+        if (isFirst) {
+            return isa<LoadInst>(inst) || isa<StoreInst>(inst);
+        } else {
             StringRef name =
                     cast<CallInst>(inst)->getCalledFunction()->getName();
             return name == "malloc" || name == "calloc" || name == "realloc";
-        } else
-            return isa<LoadInst>(inst) || isa<StoreInst>(inst);
+        }
     }
 
-    Redirect *ri{};
-    size_t *malloc{};
+    bool getThreaded(size_t tid, size_t &mloc,
+                     std::vector<std::pair<size_t, size_t>> &re) const {
+        if (isFirst) {
+            auto it = allRedirects.find(tid);
+            assert(it != allRedirects.end());
+            re = it->second;
+        } else
+            mloc = malloc;
+        return isFirst;
+    }
+
+private:
+    std::unordered_map<
+            size_t,
+            std::vector<std::pair<size_t, size_t>>
+    > allRedirects;
+    size_t malloc;
+    bool isFirst;
 };
 
-struct ThreadedPCInfo {
-    const PCInfo *pc{};
-    size_t tid{};
-    std::vector<Function *> *dupFuncs{};
-
-    explicit ThreadedPCInfo(PCInfo *pc, size_t tid) : pc(pc), tid(tid) {}
+class ThreadedPCInfo {
+public:
+    explicit ThreadedPCInfo(const PCInfo &pc, size_t tid) {
+        bool isRedirect = pc.getThreaded(tid, malloc, redirects);
+        triSwitch = (uint8_t) (isRedirect ? 0 : 2);
+    }
 
     explicit ThreadedPCInfo(const std::vector<Function *> &dupFuncs) :
-            dupFuncs(new std::vector<Function *>(dupFuncs)) {}
+            dupFuncs(dupFuncs), triSwitch(1) {}
 
     ThreadedPCInfo() = default;
 
     size_t getSize() const {
-        return pc ? pc->getSize(tid) : dupFuncs->size();
+        switch (triSwitch) {
+            case 0:
+                return redirects.size();
+            case 1:
+                return dupFuncs.size();
+            case 2:
+                return 1;
+            default:
+                assert(false);
+        }
     }
+
+    uint8_t getLoopWise(size_t loopid,
+                        std::pair<size_t, size_t> &redirect,
+                        Function *&callee, size_t &mloc) const {
+        switch (triSwitch) {
+            case 0:
+                assert(redirects.size() > loopid);
+                redirect = redirects[loopid];
+                break;
+            case 1:
+                assert(dupFuncs.size() > loopid);
+                callee = dupFuncs[loopid];
+                break;
+            case 2:
+                mloc = malloc;
+                break;
+            default:
+                assert(false);
+        }
+        return triSwitch;
+    }
+
+private:
+    std::vector<std::pair<size_t, size_t>> redirects{};
+    std::vector<Function *> dupFuncs{};
+    size_t malloc{};
+    uint8_t triSwitch{};
 };
 
-struct ExpandedPCInfo {
-    const ThreadedPCInfo *tpc;
-    size_t loopid;
-
+class ExpandedPCInfo {
+public:
     ExpandedPCInfo() = default;
 
-    explicit ExpandedPCInfo(const ThreadedPCInfo &info, size_t loopid) :
-            tpc(&info), loopid(loopid) {}
-};
+    explicit ExpandedPCInfo(const ThreadedPCInfo &info, size_t loopid) {
+        triSwitch = info.getLoopWise(loopid, redirect, callee, malloc);
+    }
 
-struct ActionType {
-    enum Action { changeMalloc, changeOffset, changeCallee };
-    size_t malloc;
-    long offset;
-    Function *callee;
-    Action action;
-
-    explicit ActionType(const ExpandedPCInfo &info) {
-        const PCInfo *pc = info.tpc->pc;
-        if (pc) {
-            if (pc->ri) {
-                size_t from, to;
-                std::tie(from, to) = pc->ri->allRedirects[info.tpc->tid][info.loopid];
-                offset = (long)to - (long)from;
-                action = changeOffset;
-            }
-            else
-                malloc = *pc->malloc, action = changeMalloc;
-        }
-        else {
-            auto *funcsVec = info.tpc->dupFuncs;
-            assert(funcsVec->size() > info.loopid);
-            callee = (*funcsVec)[info.loopid];
-            action = changeCallee;
+    template<typename Func1, typename Func2, typename Func3>
+    void actOn(Func1 f1, Func2 f2, Func3 f3) const {
+        switch (triSwitch) {
+            case 0:
+                f1(redirect);
+                return;
+            case 1:
+                f2(callee);
+                return;
+            case 2:
+                f3(malloc);
+                return;
+            default:
+                assert(false);
         }
     }
+
+private:
+    std::pair<size_t, size_t> redirect;
+    Function *callee{};
+    size_t malloc{};
+    uint8_t triSwitch{};
 };
 
-typedef std::unordered_map<Instruction *, PCInfo *> PreCloneT;
+typedef std::unordered_map<Instruction *, PCInfo> PreCloneT;
 typedef std::unordered_map<Instruction *, ThreadedPCInfo> PostCloneT;
 typedef std::unordered_map<Instruction *, ExpandedPCInfo> PostUnrollT;
 
@@ -166,10 +193,10 @@ CallInst *getCallToPThread(Function *orig) {
         CallInst *call = cast<CallInst>(user);
         if (!call) continue;
         StringRef name = call->getCalledFunction()->getName();
-        assert(name == "pthread_create");
+        if (name != "pthread_create") continue;
         ret.push_back(call);
     }
-    assert(ret.size() == 1);
+    assert(ret.size() == 1 && "Multiple pthread_create calling this function");
     return ret[0];
 }
 

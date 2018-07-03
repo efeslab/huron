@@ -28,28 +28,29 @@ public:
         }
         dbgs() << "  Processing instructions.\n";
         size_t c = 0, m = 0, o = 0;
+
         for (const auto &p2: finalTable) {
-            ActionType action(p2.second);
-            switch (action.action) {
-                case ActionType::changeCallee:
-                    replaceCallFunc(p2.first, action.callee);
-                    c++;
-                    break;
-                case ActionType::changeMalloc:
-                    adjustMalloc(p2.first, action.malloc);
-                    m++;
-                    break;
-                case ActionType::changeOffset:
-                    offsetSimplInst(p2.first, action.offset);
-                    o++;
-                    break;
-            }
+            auto changeOffset = [this, p2, &o](std::pair<size_t, size_t> fromTo) {
+                long offset = (long)fromTo.second - (long)fromTo.first;
+                offsetSimplInst(p2.first, offset);
+                o++;
+            };
+            auto changeCallee = [this, p2, &c](Function *callee) {
+                replaceCallFunc(p2.first, callee);
+                c++;
+            };
+            auto changeMalloc = [this, p2, &m](size_t malloc) {
+                adjustMalloc(p2.first, malloc);
+                m++;
+            };
+            p2.second.actOn(changeOffset, changeCallee, changeMalloc);
         }
         dbgs() << "  (c, m, o) = (" << c << ", " << m << ", " << o << ")\n";
     }
 
 private:
     void replaceCallFunc(Instruction *inst, Function *newFunc) const {
+        inst->dump();
         CallInst *call = cast<CallInst>(inst);
         call->setArgOperand(2, newFunc);
     }

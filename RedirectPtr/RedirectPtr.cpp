@@ -123,7 +123,7 @@ void RedirectPtr::duplicateFuncIfNeeded(Function *func, const PreCloneT &instInf
     // If used by more than 1 threads, provide copies.
     std::set<size_t> funcUserThreads;
     for (const auto &instInfoP : instInfos) {
-        std::set<size_t> threads = instInfoP.second->getThreads();
+        std::set<size_t> threads = instInfoP.second.getThreads();
         funcUserThreads.insert(threads.begin(), threads.end());
     }
     if (funcUserThreads.size() != 1) {
@@ -166,7 +166,7 @@ bool RedirectPtr::runOnModule(Module &M) {
                 if (it == profile.end()) continue;
                 ins->dump();
                 assert(it->second.isCorrectInst(&*ins));
-                instInfos[&*ins] = &(it->second);
+                instInfos[&*ins] = it->second;
             }
         }
         if (instInfos.empty())
