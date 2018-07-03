@@ -196,6 +196,8 @@ CallInst *getCallToPThread(Function *orig) {
         if (name != "pthread_create") continue;
         ret.push_back(call);
     }
+    if (ret.empty())
+        return nullptr;
     assert(ret.size() == 1 && "Multiple pthread_create calling this function");
     return ret[0];
 }

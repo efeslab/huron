@@ -6,6 +6,7 @@
 #include <fstream>
 #include <set>
 #include <unordered_map>
+#include <llvm/IR/InstIterator.h>
 
 #include "GroupFuncLoop.h"
 #include "Utils.h"
@@ -35,7 +36,9 @@ namespace {
 
         void loadLocInfo(std::istream &is);
 
-        void duplicateFuncIfNeeded(Function *func, const PreCloneT &instInfos);
+        void resolveThreadedFunc(Function *func, const PreCloneT &instInfos);
+
+        void replaceThreadedFuncCall(Function *func, size_t tid);
 
         LLVMContext *context{};
         DataLayout *layout{};
@@ -43,6 +46,8 @@ namespace {
         std::unordered_map<std::pair<size_t, size_t>, PCInfo> profile{};
         // Profile with offset replaced by pointers and PCInfo splitted (partially applied)
         std::unordered_map<Function *, PostCloneT> absPosProfile{};
+        // All cloned functions.
+        std::unordered_map<Function *, std::unordered_map<size_t, Function *>> clonedFuncs{};
     };
 
 }  // namespace
@@ -117,7 +122,7 @@ PostCloneT getEquivalentInsts(size_t tid, const ValueToValueMapTy &map, const Pr
     return ret;
 }
 
-void RedirectPtr::duplicateFuncIfNeeded(Function *func, const PreCloneT &instInfos) {
+void RedirectPtr::resolveThreadedFunc(Function *func, const PreCloneT &instInfos) {
     // Get thread usage for each function,
     // combined from all instructions in it.
     // If used by more than 1 threads, provide copies.
@@ -127,23 +132,49 @@ void RedirectPtr::duplicateFuncIfNeeded(Function *func, const PreCloneT &instInf
         funcUserThreads.insert(threads.begin(), threads.end());
     }
     if (funcUserThreads.size() != 1) {
-        std::vector<Function *> dupFuncs;
+        std::vector<std::pair<Function *, size_t>> dupFuncs;
+        CallInst *creator = getCallToPThread(func);
         for (size_t tid : funcUserThreads) {
             // name: `func` -> `func_1` (thread 1 version)
             std::string newName = func->getName().str() + "_" + std::to_string(tid);
             ValueToValueMapTy map;
             Function *newFunc = CloneFunction(func, map);
             newFunc->setName(newName);
-            dupFuncs.emplace_back(newFunc);
+            dupFuncs.emplace_back(newFunc, tid);
             this->absPosProfile[newFunc] = getEquivalentInsts(tid, map, instInfos);
         }
-        CallInst *creator = getCallToPThread(func);
-        Function *creatorFunc = creator->getParent()->getParent();\
-        this->absPosProfile[creatorFunc].emplace(creator, ThreadedPCInfo(dupFuncs));
+        if (creator) {
+            // Directly created by pthread_create.
+            // Remember to replace the function name in pthread_create call,
+            // potentially unrolling the loop around pthread_create.
+            Function *creatorFunc = creator->getParent()->getParent();
+            std::vector<Function *> cloned;
+            for (const auto &p: dupFuncs)
+                cloned.push_back(p.first);
+            this->absPosProfile[creatorFunc].emplace(creator, ThreadedPCInfo(cloned));
+        }
+        for (const auto &p: dupFuncs)
+            this->clonedFuncs[func].emplace(p.second, p.first);
     } else {
         size_t tid = *funcUserThreads.begin();
         for (const auto &p: instInfos)
             this->absPosProfile[func].emplace(p.first, ThreadedPCInfo(p.second, tid));
+    }
+}
+
+void RedirectPtr::replaceThreadedFuncCall(Function *func, size_t tid) {
+    dbgs() << "Replacing calls in threaded function " << func->getName() << '\n';
+    for (auto ins = inst_begin(func), ie = inst_begin(func); ins != ie; ++ins) {
+        CallInst *call = cast<CallInst>(&*ins);
+        if (!call) continue;
+        Function *callee = call->getFunction();
+        auto it = this->clonedFuncs.find(callee);
+        if (it == this->clonedFuncs.end()) continue;
+        const auto &clones = it->second;
+        auto it2 = clones.find(tid);
+        assert(it2 != clones.end());
+        call->setCalledFunction(it2->second);
+        dbgs() << callee->getName() << "->" << it2->second->getName() << '\n';
     }
 }
 
@@ -171,10 +202,17 @@ bool RedirectPtr::runOnModule(Module &M) {
         }
         if (instInfos.empty())
             continue;
-        this->duplicateFuncIfNeeded(&*fb, instInfos);
+        this->resolveThreadedFunc(&*fb, instInfos);
     }
     
     dbgs() << "\nWorking on functions.\n";
+
+    dbgs() << "\n";
+    for (const auto &p: this->clonedFuncs)
+        for (const auto &p2: p.second)
+            replaceThreadedFuncCall(p2.second, p2.first);
+    dbgs() << "\n";
+
     for (auto &p: absPosProfile) {
         GroupFuncLoop funcPass(this, this->context, this->layout, p.second);
         funcPass.runOnFunction(*p.first);
