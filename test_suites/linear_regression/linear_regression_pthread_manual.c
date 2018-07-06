@@ -141,14 +141,14 @@ int main(int argc, char *argv[])
    pthread_t tmps[8];
    for(i = 0; i < num_threads; i++)
    {
-	   tid_args[i].points = &points[i*req_units];
-	   tid_args[i].num_elems = req_units;
-     tmps[i] = tid_args[i].tid;
-	   if(i == (num_threads - 1))
-			tid_args[i].num_elems = n - i*req_units;
+	    tid_args[i].points = &points[i*req_units];
+        int tmp_req_units= req_units;
+        if (i == (num_threads - 1))tmp_req_units = n - i*req_units;
+	    tid_args[i].num_elems = tmp_req_units;
+        tmps[i] = tid_args[i].tid;
 
-	   CHECK_ERROR(pthread_create(&tmps[i], &attr, linear_regression_pthread, (void *)&tid_args[i]) != 0);
-     tid_args[i].tid = tmps[i];
+	    CHECK_ERROR(pthread_create(&tmps[i], &attr, linear_regression_pthread, (void *)&tid_args[i]) != 0);
+        tid_args[i].tid = tmps[i];
    }
 
    long long SX_ll = 0, SY_ll = 0, SXX_ll = 0, SYY_ll = 0, SXY_ll = 0;

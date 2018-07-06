@@ -77,7 +77,7 @@ void *linear_regression_pthread(void *args_in)
     // FILE *f = fopen(name, "w");
     // fprintf(f, "num_elems = %d\n\n", args->num_elems);
     // ADD UP RESULTS
-   for(j=0; j <1; j++){
+   for(j=0; j <100; j++){
    for (i = 0; i < args->num_elems; i++)
    {
     //    fprintf(f, "x, y = %d, %d\n", args->points[i].x, args->points[i].y);
