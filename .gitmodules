@@ -1,0 +1,3 @@
+[submodule "others/sheriff"]
+	path = others/sheriff
+	url = https://github.com/plasma-umass/sheriff.git
