@@ -72,10 +72,17 @@ void *linear_regression_pthread(void *args_in)
    args->SYY = 0;
    args->SXY = 0;
 
+    // char name[100];
+    // sprintf(name, "th_%lu.txt", args->tid % 1000);
+    // FILE *f = fopen(name, "w");
+    // fprintf(f, "num_elems = %d\n\n", args->num_elems);
     // ADD UP RESULTS
-   for(j=0; j <100; j++){
+   for(j=0; j <1; j++){
    for (i = 0; i < args->num_elems; i++)
    {
+    //    fprintf(f, "x, y = %d, %d\n", args->points[i].x, args->points[i].y);
+    //    fprintf(f, "SX, SY, SYY, SXX, SXY = %lld, %lld, %lld, %lld, %lld\n", 
+    //    args->SX, args->SY, args->SYY, args->SXX, args->SXY);
       //Compute SX, SY, SYY, SXX, SXY
       args->SX  += args->points[i].x;
       args->SXX += args->points[i].x*args->points[i].x;
@@ -142,10 +149,10 @@ int main(int argc, char *argv[])
    for(i = 0; i < num_threads; i++)
    {
 	   tid_args[i].points = &points[i*req_units];
-	   tid_args[i].num_elems = req_units;
-     tmps[i] = tid_args[i].tid;
-	   if(i == (num_threads - 1))
-			tid_args[i].num_elems = n - i*req_units;
+       int tmp_req_units= req_units;
+       if (i == (num_threads - 1))tmp_req_units = n - i*req_units;
+	   tid_args[i].num_elems = tmp_req_units;
+       tmps[i] = tid_args[i].tid;
 
 	   CHECK_ERROR(pthread_create(&tmps[i], &attr, linear_regression_pthread, (void *)&tid_args[i]) != 0);
      tid_args[i].tid = tmps[i];
