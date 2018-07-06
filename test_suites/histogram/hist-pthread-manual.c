@@ -98,7 +98,7 @@ void *calc_hist(void *arg) {
    int *red;
    int *green;
    int *blue;
-   int i;
+   int i,j;
    thread_arg_t *thread_arg = (thread_arg_t *)arg;
    unsigned char *val;
    /*
@@ -112,6 +112,7 @@ void *calc_hist(void *arg) {
    
    
    //printf("Starting at %ld, doing %ld bytes\n", thread_arg->data_pos, thread_arg->data_len);
+   for(j=0; j<60; j++){
    for (i= thread_arg->data_pos; 
         i < thread_arg->data_pos + thread_arg->data_len; 
         i+=3) {
@@ -124,6 +125,7 @@ void *calc_hist(void *arg) {
       
       val = &(thread_arg->data[i+2]);
       red[*val]++;   
+   }
    }
    /*
    thread_arg->red = red;
@@ -220,11 +222,13 @@ int main(int argc, char *argv[]) {
    for (i = 0; i < num_procs; i++) {
       arg[i].data = (unsigned char *)fdata;
       arg[i].data_pos = curr_pos;
-      arg[i].data_len = num_per_thread;
+      long tmp_data_len = num_per_thread;
       if (excess > 0) {
-         arg[i].data_len++;
+         tmp_data_len++;
          excess--;
       }
+
+      arg[i].data_len = tmp_data_len;
       
       arg[i].data_len *= 3;   // 3 bytes per pixel
       curr_pos += arg[i].data_len;
