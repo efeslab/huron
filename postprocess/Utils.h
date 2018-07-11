@@ -70,6 +70,117 @@ void print_bv_as_set(ostream &os, const vector<bool> &set) {
     os << '}';
 }
 
+struct RW {
+    uint32_t r, w;
+
+    explicit RW(uint32_t _r = 0, uint32_t _w = 0) : r(_r), w(_w) {}
+
+    RW operator+(const RW &rhs) {
+        return RW(r + rhs.r, w + rhs.w);
+    }
+
+    RW &operator+=(const RW &rhs) {
+        r += rhs.r;
+        w += rhs.w;
+        return *this;
+    }
+
+    friend ostream &operator<<(ostream &os, const RW &rw) {
+        os << '(' << rw.r << ", " << rw.w << ')';
+        return os;
+    }
+};
+
+struct PC {
+    uint16_t func, inst;
+
+    PC(uint16_t f, uint16_t i) : func(f), inst(i) {}
+
+    bool operator==(const PC &rhs) const {
+        return func == rhs.func && inst == rhs.inst;
+    }
+
+    bool operator<(const PC &rhs) const {
+        if (func < rhs.func)
+            return true;
+        if (func > rhs.func)
+            return false;
+        return inst < rhs.inst;
+    }
+
+    friend ostream &operator<<(ostream &os, const PC &pc) {
+        os << '(' << pc.func << ", " << pc.inst << ')';
+        return os;
+    }
+};
+
+namespace std {
+    template<>
+    struct hash<PC> {
+        std::size_t operator()(PC const &pc) const {
+            std::size_t res = 0;
+            hash_combine(res, pc.func);
+            hash_combine(res, pc.inst);
+            return res;
+        }
+    };
+}
+
+struct Segment {
+    size_t start, end;
+
+    explicit Segment(size_t _start = 0, size_t _end = 0) : start(_start), end(_end) {}
+
+    bool operator==(const Segment &rhs) const {
+        return start == rhs.start && end == rhs.end;
+    }
+
+    bool operator<(const Segment &rhs) const {
+        return start < rhs.start || (start == rhs.start && end < rhs.end);
+    }
+
+    bool overlap(const Segment &rhs) const {
+        return (start < rhs.end && end > rhs.start) || (rhs.start < end && rhs.end > start);
+    }
+
+    friend ostream &operator<<(ostream &os, const Segment &seg) {
+        os << "(" << seg.start << ", " << seg.end << ")";
+        return os;
+    }
+
+    Segment subtract_by(size_t sz) const {
+        return Segment(start - sz, end - sz);
+    }
+
+    static vector<Segment> merge_neighbors(const vector<Segment> &segs) {
+        if (segs.empty())
+            return vector<Segment>();
+        vector<Segment> ret;
+        Segment last = segs[0];
+        for (size_t i = 1; i < segs.size(); i++) {
+            if (last.end != segs[i].start) {
+                ret.push_back(last);
+                last = segs[i];
+            } else
+                last.end = segs[i].end;
+        }
+        ret.push_back(last);
+        return ret;
+    }
+};
+
+namespace std {
+    template<>
+    struct hash<Segment> {
+        std::size_t operator()(Segment const &seg) const {
+            std::size_t res = 0;
+            hash_combine(res, seg.start);
+            hash_combine(res, seg.end);
+            return res;
+        }
+    };
+}
+
 namespace std {
     template<class T>
     struct hash<std::set<T>> {

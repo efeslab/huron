@@ -6,119 +6,10 @@
 #include <map>
 #include <stack>
 #include "Utils.h"
+#include "Layout.h"
+#include "Stats.h"
 
 using namespace std;
-
-struct RW {
-    uint32_t r, w;
-
-    explicit RW(uint32_t _r = 0, uint32_t _w = 0) : r(_r), w(_w) {}
-
-    RW operator+(const RW &rhs) {
-        return RW(r + rhs.r, w + rhs.w);
-    }
-
-    RW &operator+=(const RW &rhs) {
-        r += rhs.r;
-        w += rhs.w;
-        return *this;
-    }
-
-    friend ostream &operator<<(ostream &os, const RW &rw) {
-        os << '(' << rw.r << ", " << rw.w << ')';
-        return os;
-    }
-};
-
-struct PC {
-    uint16_t func, inst;
-
-    PC(uint16_t f, uint16_t i) : func(f), inst(i) {}
-
-    bool operator==(const PC &rhs) const {
-        return func == rhs.func && inst == rhs.inst;
-    }
-
-    bool operator<(const PC &rhs) const {
-        if (func < rhs.func)
-            return true;
-        if (func > rhs.func)
-            return false;
-        return inst < rhs.inst;
-    }
-
-    friend ostream &operator<<(ostream &os, const PC &pc) {
-        os << '(' << pc.func << ", " << pc.inst << ')';
-        return os;
-    }
-};
-
-namespace std {
-    template<>
-    struct hash<PC> {
-        std::size_t operator()(PC const &pc) const {
-            std::size_t res = 0;
-            hash_combine(res, pc.func);
-            hash_combine(res, pc.inst);
-            return res;
-        }
-    };
-}
-
-struct Segment {
-    size_t start, end;
-
-    Segment(size_t _start = 0, size_t _end = 0) : start(_start), end(_end) {}
-
-    bool operator==(const Segment &rhs) const {
-        return start == rhs.start && end == rhs.end;
-    }
-
-    bool operator<(const Segment &rhs) const {
-        return start < rhs.start || (start == rhs.start && end < rhs.end);
-    }
-
-    bool overlap(const Segment &rhs) const {
-        return (start < rhs.end && end > rhs.start) || (rhs.start < end && rhs.end > start);
-    }
-
-    friend ostream &operator<<(ostream &os, const Segment &seg) {
-        os << "(" << seg.start << ", " << seg.end << ")";
-        return os;
-    }
-
-    Segment subtract_by(size_t sz) const {
-        return {start - sz, end - sz};
-    }
-
-    static vector<Segment> merge_neighbors(const vector<Segment> &segs) {
-        if (segs.empty())
-            return vector<Segment>();
-        vector<Segment> ret;
-        Segment last = segs[0];
-        for (size_t i = 1; i < segs.size(); i++) {
-            if (last.end != segs[i].start) {
-                ret.push_back(last);
-                last = segs[i];
-            } else
-                last.end = segs[i].end;
-        }
-        ret.push_back(last);
-        return ret;
-    }
-};
-
-namespace std {
-    template<>
-    struct hash<Segment> {
-        std::size_t operator()(Segment const &seg) const {
-            std::size_t res = 0;
-            hash_combine(res, seg.start);
-            hash_combine(res, seg.end);
-            return res;
-        }
-    };
-}
 
 struct Record {
     size_t addr;
@@ -248,10 +139,6 @@ public:
         return range < rhs.range;
     }
 
-    const Segment &get_segment() const {
-        return range;
-    };
-
 private:
     unordered_map<uint32_t, RW> thread_rw;
     unordered_map<PC, RW> pc_rw;
@@ -348,14 +235,13 @@ public:
 
     MallocStorageT(MallocStorageT &&) = default;
 
-    MallocStorageT() : minfo(), malloc_fs(0), m_id(0) {}
+    MallocStorageT() : minfo(), malloc_fs(0), after_mapped(0), m_id(0) {}
 
     explicit MallocStorageT(
             int _m_id, const MallocInfo &_m,
             const unordered_map<Segment, vector<Record>> &bucket,
-            size_t graph_threshold
-    ) :
-            minfo(_m), malloc_fs(0), m_id(_m_id) {
+            size_t graph_threshold) :
+            minfo(_m), malloc_fs(0), after_mapped(0), m_id(_m_id) {
         size_t m_start = _m.start;
         find_overlap(_m_id, m_start, bucket);
         for (const auto &p: bucket) {
@@ -363,10 +249,38 @@ public:
             records.emplace_back(seg, _m_id, m_start, p.second);
         }
         calc_graphs(graph_threshold);
-        if (m_id != -1 && !graphs.empty())
-            get_fixed_layout();
     }
 
+    bool valid() {
+        return m_id != -1 && !graphs.empty();
+    }
+
+    size_t get_n_false_sharing() const {
+        return malloc_fs;
+    }
+
+    friend ostream &operator<<(ostream &os, const MallocStorageT &mst) {
+        os << "=================" << mst.m_id << "(" << mst.malloc_fs << ")================\n";
+        for (const Graph &g: mst.graphs)
+            os << g;
+        return os;
+    }
+
+    multimap<PC, tuple<size_t, size_t, size_t>> get_pc_grouped_layout() {
+        Layout layout;
+        for (const auto &rec: records)
+            for (const auto &p: rec.pc_threads)
+                layout.insert(p.first, p.second, rec.range);
+        layout.compute();
+        after_mapped = layout.get_new_size();
+        return layout.get_remapping();
+    }
+
+    tuple<PC, size_t, size_t> get_fixed_malloc() const {
+        return make_tuple(minfo.pc, minfo.size, after_mapped);
+    }
+
+private:
     void calc_graphs(size_t threshold) {
         map<size_t, vector<AddrRecord>> cachelines;
         for (const auto &rec: records) {
@@ -388,101 +302,6 @@ public:
         });
     }
 
-    bool empty() {
-        return graphs.empty();
-    }
-
-    size_t get_n_false_sharing() const {
-        return malloc_fs;
-    }
-
-    friend ostream &operator<<(ostream &os, const MallocStorageT &mst) {
-        os << "=================" << mst.m_id << "(" << mst.malloc_fs << ")================\n";
-        for (const Graph &g: mst.graphs)
-            os << g;
-        return os;
-    }
-
-    multimap<PC, tuple<size_t, size_t, size_t>> get_pc_grouped_layout() const {
-        multimap<PC, tuple<size_t, size_t, size_t>> ret;
-        for (const auto &p: access_relation) {
-            const PC &pc = p.first.first;
-            uint32_t thread = p.first.second;
-            for (const auto &seg: p.second) {
-                auto it = remappings.upper_bound(seg.start);
-                assert(it != remappings.begin());
-                it--;
-                size_t size = it->second.end - it->second.start;
-                assert(seg.start >= it->first && seg.end <= it->first + size);
-                size_t mapped = seg.start - it->first + it->second.start;
-                ret.emplace(pc, make_tuple(thread, seg.start, mapped));
-            }
-        }
-        return ret;
-    }
-
-    void get_fixed_layout() {
-        for (const auto &rec: records) {
-            Segment rec_range = rec.get_segment();
-            for (const auto &p: rec.pc_threads)
-                this->access_relation[p].push_back(rec_range);
-        }
-        for (auto &p : this->access_relation) {
-            sort(p.second.begin(), p.second.end());
-            p.second = Segment::merge_neighbors(p.second);
-        }
-        map<Segment, size_t> thread_affinity;
-        for (const auto &p: this->access_relation)
-            for (const auto &seg: p.second) {
-                uint32_t thread = p.first.second;
-                assert(thread < sizeof(size_t) * 8);
-                thread_affinity[seg] |= 1 << thread;
-            }
-        auto it = thread_affinity.begin();
-        stack<pair<Segment, size_t>> merging_stack;
-        merging_stack.push(*it);
-        it++;
-        for (; it != thread_affinity.end(); it++) {
-            auto &top = merging_stack.top();
-            // if current interval is not overlapping with stack top,
-            // push it to the stack
-            // Otherwise update the ending time of top
-            if (top.first.end <= it->first.start)
-                merging_stack.push(*it);
-            else {
-                top.first.end = max(top.first.end, it->first.end);
-                top.second |= it->second;
-            }
-        }
-        thread_affinity.clear();
-        while (!merging_stack.empty()) {
-            thread_affinity.insert(merging_stack.top());
-            merging_stack.pop();
-        }
-        map<size_t, vector<Segment>> thread_grouped;
-        for (const auto &p: thread_affinity)
-            thread_grouped[p.second].push_back(p.first);
-        for (auto &p: thread_grouped)
-            sort(p.second.begin(), p.second.end());
-        size_t offset = 0;
-        for (const auto &p : thread_grouped) {
-            if (offset != 0)
-                offset += 1 << CACHELINE_BIT;
-            for (const auto &seg: p.second) {
-                Segment map_to(offset, offset + seg.end - seg.start);
-                this->remappings[seg.start] = map_to;
-                offset = map_to.end;
-            }
-        }
-        this->after_mapped = offset;
-    }
-
-    void print_fixed_malloc(ostream &os) const {
-        os << minfo.pc.func << ' ' << minfo.pc.inst << ' ' << minfo.size
-           << ' ' << after_mapped << '\n';
-    }
-
-private:
     void find_overlap(int m_id, size_t m_start, const unordered_map<Segment, vector<Record>> &bucket) {
         const Segment *prev = nullptr;
         for (const auto &it : bucket) {
@@ -495,8 +314,6 @@ private:
 
     vector<AddrRecord> records;
     vector<Graph> graphs;
-    map<size_t, Segment> remappings;
-    map<pair<PC, uint32_t>, vector<Segment>> access_relation;
     MallocInfo minfo;
     size_t malloc_fs, after_mapped;
     int m_id;
@@ -523,26 +340,11 @@ map<int, MallocStorageT> compute_from_log(ifstream &logf, ifstream &mf, size_t g
         if (!(i++ % 1000))
             cout << "# of mallocs processed: " << i - 1 << '/' << bins.size() << endl;
         MallocStorageT malloc_t(p.first, mallocs[p.first], p.second, graph_threshold);
-        if (!malloc_t.empty())
+        if (malloc_t.valid())
             ret.emplace(p.first, move(malloc_t));
     }
     cout << "# of mallocs processed: " << bins.size() << '/' << bins.size() << endl;
     return ret;
-}
-
-void print_pc_trans_table(ostream &os,
-                          const multimap<PC, tuple<size_t, size_t, size_t>> &all_pcs_layout) {
-    typedef tuple<size_t, size_t, size_t> LayoutT;
-    map<PC, vector<LayoutT>> pc_grouped;
-    for (const auto &pc_layout: all_pcs_layout)
-        pc_grouped[pc_layout.first].push_back(pc_layout.second);
-    for (auto &pc_layout: pc_grouped) {
-        sort(pc_layout.second.begin(), pc_layout.second.end());
-        os << pc_layout.first.func << ' ' << pc_layout.first.inst << ' '
-           << pc_layout.second.size() << '\n';
-        for (const auto &layout: pc_layout.second)
-            os << get<0>(layout) << ' ' << get<1>(layout) << ' ' << get<2>(layout) << '\n';
-    }
 }
 
 int main(int argc, char *argv[]) {
@@ -562,25 +364,18 @@ int main(int argc, char *argv[]) {
 
     auto groups = compute_from_log(log_file, malloc_file, threshold);
     ofstream graphs_stream(insert_suffix(log_path, "_summary"));
-    ofstream stats_stream(insert_suffix(log_path, "_fs_malloc"));
-    ofstream layout_stream(out_path);
 
-    size_t n_mallocs = 0;
-    map<size_t, size_t> fs_cl_ordering;
-    multimap<PC, tuple<size_t, size_t, size_t>> all_pcs_layout;
-
-    layout_stream << groups.size() << '\n';
-    for (const auto &pair: groups) {
-        n_mallocs++;
-        fs_cl_ordering.emplace(pair.second.get_n_false_sharing(), pair.first);
+    TransTableStat ttStat(out_path);
+    FSRankStat fsrStat(insert_suffix(log_path, "_fs_malloc"));
+    for (auto &pair: groups) {
+        fsrStat.emplace(pair.second.get_n_false_sharing(), pair.first);
         graphs_stream << pair.second;
         auto layout = pair.second.get_pc_grouped_layout();
-        all_pcs_layout.insert(layout.begin(), layout.end());
-        pair.second.print_fixed_malloc(layout_stream);
+        ttStat.merge_layout(layout.begin(), layout.end());
+        ttStat.insert_malloc(pair.second.get_fixed_malloc());
     }
+    ttStat.print();
+    fsrStat.print();
 
-    print_pc_trans_table(layout_stream, all_pcs_layout);
-
-    for (auto it = fs_cl_ordering.rbegin(); it != fs_cl_ordering.rend(); it++)
-        stats_stream << '#' << it->first << '@' << it->second << '\n';
+    return 0;
 }
