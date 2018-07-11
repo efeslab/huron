@@ -61,6 +61,10 @@ static cl::opt<std::string> locfile("locfile", cl::desc("Specify profile path"),
 void RedirectPtr::loadProfile() {
     dbgs() << "Loading from file: " << locfile << "\n\n";
     std::ifstream fin(locfile.c_str());
+    if (fin.fail()) {
+        errs() << "Open file failed! Exiting.\n";
+        exit(1);
+    }
     loadMallocInfo(fin);
     loadLocInfo(fin);
 }
