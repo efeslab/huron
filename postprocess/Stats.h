@@ -21,7 +21,8 @@ public:
     }
 
     void insert_malloc(const tuple<PC, size_t, size_t> &tup) {
-        all_fixed_mallocs.push_back(tup);
+        if (get<2>(tup) != get<1>(tup))
+            all_fixed_mallocs.push_back(tup);
     }
 
     void print() {

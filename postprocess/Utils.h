@@ -248,4 +248,30 @@ size_t to_address(const string_view &str) {
     return val;
 }
 
+template<typename T>
+class AllEqual {
+public:
+    AllEqual() : is_first(true), is_unequal(false) {}
+
+    void next(const T &t) {
+        if (is_unequal)
+            return;
+        if (is_first)
+            prev = t, is_first = false;
+        else if (t != prev)
+            is_unequal = true;
+    }
+
+    bool is_all_equal() const {
+        return !is_unequal;
+    }
+
+    const T &last_value() const {
+        return prev;
+    }
+private:
+    T prev;
+    bool is_first, is_unequal;
+};
+
 #endif //POSTPROCESS_UTILS_H
