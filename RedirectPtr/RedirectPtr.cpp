@@ -131,7 +131,7 @@ void RedirectPtr::resolveThreadedFunc(Function *func, const PreCloneT &instInfos
         std::set<size_t> threads = instInfoP.second.getThreads();
         funcUserThreads.insert(threads.begin(), threads.end());
     }
-    if (funcUserThreads.size() != 1) {
+    if (funcUserThreads.size() > 1) {
         std::vector<std::pair<Function *, size_t>> dupFuncs;
         CallInst *creator = getCallToPThread(func);
         for (size_t tid : funcUserThreads) {
@@ -156,7 +156,7 @@ void RedirectPtr::resolveThreadedFunc(Function *func, const PreCloneT &instInfos
         for (const auto &p: dupFuncs)
             this->clonedFuncs[func].emplace(p.second, p.first);
     } else {
-        size_t tid = *funcUserThreads.begin();
+        size_t tid = funcUserThreads.empty() ? 0 : *funcUserThreads.begin();
         for (const auto &p: instInfos)
             this->absPosProfile[func].emplace(p.first, ThreadedPCInfo(p.second, tid));
     }
