@@ -18,6 +18,13 @@ void handle_access(uintptr_t addr, uint64_t func_id, uint64_t inst_id,
 
 void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id);
 
+void *calloc_inst(size_t n, size_t size, uint64_t func_id, uint64_t inst_id);
+
+void *realloc_inst(void *ptr, size_t size, uint64_t func_id, uint64_t inst_id);
+
+int posix_memalign_inst(void **memptr, size_t alignment, size_t size, 
+                        uint64_t func_id, uint64_t inst_id);
+
 void store_16bytes(uintptr_t addr, uint64_t func_id, uint64_t inst_id) {
     handle_access(addr, func_id, inst_id, 16, true);
 }
@@ -90,6 +97,12 @@ void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id) {
     return start_ptr;
 }
 
+void *calloc_inst(size_t n, size_t size, uint64_t func_id, uint64_t inst_id) {
+    size_t total = n * size;
+    void *p = malloc_inst(total, func_id, inst_id);
+    return p ? memset(p, 0, total) : nullptr;
+}
+
 void *realloc_inst(void *ptr, size_t size, uint64_t func_id, uint64_t inst_id) {
     void *new_start_ptr = __libc_realloc(ptr, size);
     // RAII deactivate malloc hook so that we can use realloc below.
@@ -127,30 +140,35 @@ int posix_memalign_inst(void **memptr, size_t alignment, size_t size,
 
 void *malloc(size_t size) noexcept {
     if (current && current->all_hooks_active) {
-        fprintf(stderr, "Code is visiting uninstrumented malloc/calloc.\n");
-        return malloc_inst(size, uint64_t(-1), uint64_t(-1));
+        HookDeactivator deactiv;
+        fprintf(stderr, "Code is visiting uninstrumented malloc.\n");
     }
     return __libc_malloc(size);
 }
 
 void *calloc(size_t n, size_t size) {
+    if (current && current->all_hooks_active) {
+        HookDeactivator deactiv;
+        fprintf(stderr, "Code is visiting uninstrumented calloc.\n");
+    }
     size_t total = n * size;
-    void *p = malloc(total);
+    void *p = __libc_malloc(total);
     return p ? memset(p, 0, total) : nullptr;
 }
 
 void *realloc(void *ptr, size_t size) {
     if (current && current->all_hooks_active) {
+        HookDeactivator deactiv;
         fprintf(stderr, "Code is visiting uninstrumented realloc.\n");
-        return realloc_inst(ptr, size, uint64_t(-1), uint64_t(-1));
     }
     return __libc_realloc(ptr, size);
 }
 
 int posix_memalign(void **memptr, size_t alignment, size_t size) {
     if (current && current->all_hooks_active) {
-        fprintf(stderr, "Code is visiting uninstrumented posix_memalign.\n");
-        return posix_memalign_inst(memptr, alignment, size, uint64_t(-1), uint64_t(-1));
+        HookDeactivator deactiv;
+        fprintf(stderr, "Code is visiting uninstrumented posix_memalign "
+                        "(because we don't instrument posix_memalign at this time.\n");
     }
     return __internal_posix_memalign(memptr, alignment, size);
 }
