@@ -152,21 +152,66 @@ struct Segment {
         return Segment(start - sz, end - sz);
     }
 
+    bool empty() const {
+        return end <= start;
+    }
+
+    bool touch(const Segment &seg) const {
+        return end == seg.start;
+    }
+
     static vector<Segment> merge_neighbors(const vector<Segment> &segs) {
         if (segs.empty())
             return vector<Segment>();
         vector<Segment> ret;
         Segment last = segs[0];
         for (size_t i = 1; i < segs.size(); i++) {
-            if (last.end != segs[i].start) {
+            if (last.touch(segs[i]))
+                last.end = segs[i].end;
+            else {
                 ret.push_back(last);
                 last = segs[i];
-            } else
-                last.end = segs[i].end;
+            }
+
         }
         ret.push_back(last);
         return ret;
     }
+
+//    static Segment empty_seg() {
+//        return Segment(~0LU, 0);
+//    }
+
+//    static set<size_t> factorize(const set<Segment> &segs, set<vector<size_t>> &indices) {
+//        set<size_t> breakpoints;
+//        for (const auto &seg: segs) {
+//            breakpoints.insert(seg.start);
+//            breakpoints.insert(seg.end);
+//        }
+//
+//        return ret;
+//    }
+//    static set<Segment> get_uncovered(const set<Segment> &segs) {
+//        Segment rest = empty_seg();
+//        set<Segment> ret;
+//        for (const auto &seg: segs) {
+//            rest.start = min(rest.start, seg.start);
+//            rest.end = min(rest.end, seg.end);
+//        }
+//
+//        for (const auto &seg: segs) {
+//            if (rest.start >= seg.end)  // left disjoint
+//                continue;
+//            else if (seg.start <= rest.start && rest.start < seg.end)  // left cover
+//                rest.start = seg.end;
+//            else if (seg.start > rest.start && rest.start < seg.end) {
+//                ret.emplace(rest.start, seg.start);
+//                rest.start = seg.end;
+//            }
+//        }
+//
+//        return ret;
+//    }
 };
 
 namespace std {

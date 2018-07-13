@@ -13,10 +13,11 @@
 
 class Layout {
 public:
-    Layout() : after_mapped(0) {}
+    Layout() : after_mapped(0), range_max(0) {}
 
     void insert(const PC &pc, uint32_t tid, const Segment &range) {
         this->access_relation[make_pair(pc, tid)].push_back(range);
+        this->range_max = max(this->range_max, range.end);
     }
 
     void compute() {
@@ -24,14 +25,9 @@ public:
             sort(p.second.begin(), p.second.end());
             p.second = Segment::merge_neighbors(p.second);
         }
-        map<Segment, size_t> thread_affinity;
-        for (const auto &p: this->access_relation)
-            for (const auto &seg: p.second) {
-                uint32_t thread = p.first.second;
-                assert(thread < sizeof(size_t) * 8);
-                thread_affinity[seg] |= 1 << thread;
-            }
-        merge_overlapping_segments(thread_affinity);
+        reclaim_unused_ranges();
+        map<Segment, size_t> thread_affinity = get_thread_affinity();
+        merge_segments(thread_affinity);
         map<size_t, vector<Segment>> thread_grouped;
         for (const auto &p: thread_affinity)
             thread_grouped[p.second].push_back(p.first);
@@ -50,27 +46,71 @@ public:
     }
 
 private:
-    void merge_overlapping_segments(map<Segment, size_t> &arg) {
+    void merge_segments(map<Segment, size_t> &arg) {
         auto it = arg.begin();
-        stack<pair<Segment, size_t>> merging_stack;
-        merging_stack.push(*it);
+        vector<pair<Segment, size_t>> overlaps_stack;
+        overlaps_stack.emplace_back(*it);
         it++;
         for (; it != arg.end(); it++) {
-            auto &top = merging_stack.top();
-            // if current interval is not overlapping with stack top,
-            // push it to the stack
-            // Otherwise update the ending time of top
-            if (top.first.end <= it->first.start)
-                merging_stack.push(*it);
-            else {
+            auto &top = overlaps_stack.back();
+            // If overlaps, extend the Segment at stack top to include the new one,
+            // joining their thread affinity (extra false sharing may be introduced).
+            // Otherwise, just push the new one.
+            if (top.first.overlap(it->first)) {
                 top.first.end = max(top.first.end, it->first.end);
                 top.second |= it->second;
-            }
+            } else
+                overlaps_stack.emplace_back(*it);
         }
         arg.clear();
-        while (!merging_stack.empty()) {
-            arg.insert(merging_stack.top());
-            merging_stack.pop();
+        if (overlaps_stack.empty())
+            return;
+        // Do a simplifying pass: if two neighboring segments
+        // touches exactly and have the same affinity, merge them.
+        vector<pair<Segment, size_t>> touches_stack;
+        touches_stack.emplace_back(overlaps_stack.front());
+        for (size_t i = 1; i < overlaps_stack.size(); i++) {
+            auto &top = touches_stack.back(), &next = overlaps_stack[i];
+            if (top.first.touch(next.first) && top.second == next.second)
+                top.first.end = next.first.end;
+            else
+                touches_stack.emplace_back(next);
+        }
+        arg.insert(touches_stack.begin(), touches_stack.end());
+    }
+
+    map<Segment, size_t> get_thread_affinity() {
+        map<Segment, size_t> thread_affinity;
+        for (const auto &p: this->access_relation)
+            for (const auto &seg: p.second) {
+                uint32_t thread = p.first.second;
+                assert(thread < sizeof(size_t) * 8);
+                thread_affinity[seg] |= 1 << thread;
+            }
+        return thread_affinity;
+    }
+
+    void reclaim_unused_ranges() {
+        map<Segment, size_t> thread_affinity = get_thread_affinity();
+        auto *affinity_bitmap = new size_t[this->range_max]();
+        for (const auto &p: thread_affinity)
+            for (size_t i = p.first.start; i < p.first.end; i++)
+                affinity_bitmap[i] |= p.second;
+        for (auto &p: this->access_relation) {
+            if (p.second.empty())
+                continue;
+            for (auto it = p.second.begin() + 1; it != p.second.end();) {
+                const Segment &prev = *(it - 1), &next = *it;
+                Segment gap(prev.end, next.start);
+                size_t gap_usage = 0;
+                for (size_t j = gap.start; j < gap.end; j++)
+                    gap_usage |= affinity_bitmap[j];
+                if (gap_usage == 1 << p.first.second || gap_usage == 0) {
+                    it = p.second.erase(it - 1, it + 1);
+                    it = p.second.emplace(it, prev.start, next.end);
+                } else
+                    ++it;
+            }
         }
     }
 
@@ -109,13 +149,14 @@ private:
             if (!ae.is_all_equal())
                 for (const auto &t: lines)
                     remapping_lines.emplace(pc, t);
-            else if (!lines.empty() && ae.last_value() != 0)
+            else if (!lines.empty())
                 remapping_lines.emplace(pc, lines.front());
         }
     }
+
     map<pair<PC, uint32_t>, vector<Segment>> access_relation;
     multimap<PC, tuple<size_t, size_t, size_t>> remapping_lines;
-    size_t after_mapped;
+    size_t after_mapped, range_max;
 };
 
 #endif //POSTPROCESS_LAYOUT_H
