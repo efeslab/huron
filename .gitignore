@@ -20,10 +20,5 @@ output/
 *.bc
 bin/
 
-# Alternative config for histogram
-test_suites/histogram/custom/
-
-experimental/
-boost_*/
-
+# Personal compile script
 compile.sh
