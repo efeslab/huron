@@ -108,7 +108,8 @@ bool Instrumenter::doInitialization(Module &M) {
     int64Type = Type::getInt64Ty(context);
     boolType = Type::getInt8Ty(context);
 
-    Type *voidptrType = Type::getInt8PtrTy(context), *intType = Type::getInt32Ty(context);
+    Type *voidPtrType = Type::getInt8PtrTy(context), *intType = Type::getInt32Ty(context), 
+         *voidPtrPtrType = voidPtrType->getPointerTo();
 
     // We insert an empty inline asm after __asan_report* to avoid callback
     // merge.
@@ -121,19 +122,19 @@ bool Instrumenter::doInitialization(Module &M) {
     ));
 
     modifiedAllocs["malloc"] = checkInterfaceFunction(M.getOrInsertFunction(
-            "malloc_inst", voidptrType, int64Type, int64Type, int64Type
+            "malloc_inst", voidPtrType, int64Type, int64Type, int64Type
     ));
 
     modifiedAllocs["calloc"] = checkInterfaceFunction(M.getOrInsertFunction(
-            "calloc_inst", voidptrType, int64Type, int64Type, int64Type, int64Type
+            "calloc_inst", voidPtrType, int64Type, int64Type, int64Type, int64Type
     ));
 
     modifiedAllocs["realloc"] = checkInterfaceFunction(M.getOrInsertFunction(
-        "realloc_inst", voidptrType, voidptrType, int64Type, int64Type, int64Type
+        "realloc_inst", voidPtrType, voidPtrType, int64Type, int64Type, int64Type
     ));
 
     modifiedAllocs["posix_memalign"] = checkInterfaceFunction(M.getOrInsertFunction(
-        "posix_memalign_inst", intType, voidptrType, int64Type, int64Type, int64Type, int64Type
+        "posix_memalign_inst", intType, voidPtrPtrType, int64Type, int64Type, int64Type, int64Type
     ));
     return true;
 }
