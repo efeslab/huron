@@ -13,12 +13,12 @@ using namespace std;
 
 struct Record {
     size_t addr;
-    int m_id, m_offset;
+    int m_id;
     uint16_t thread, size;
     PC pc;
     RW rw;
 
-    Record() : addr(0), m_id(0), m_offset(0), thread(0), size(0), pc(0, 0), rw(0, 0) {}
+    Record() : addr(0), m_id(0), thread(0), size(0), pc(0, 0), rw(0, 0) {}
 
     friend istream &operator>>(istream &is, Record &rec) {
         static CSVParser csv(9);
@@ -30,7 +30,6 @@ struct Record {
         rec.thread = to_unsigned<uint16_t>(fields[0]);
         rec.addr = to_address(fields[1]);
         rec.m_id = to_signed<int>(fields[2]);
-        rec.m_offset = to_signed<int>(fields[3]);
         rec.pc.func = to_unsigned<uint16_t>(fields[4]);
         rec.pc.inst = to_unsigned<uint16_t>(fields[5]);
         rec.size = to_unsigned<uint16_t>(fields[6]);
@@ -42,10 +41,11 @@ struct Record {
 };
 
 struct MallocInfo {
-    size_t id, start, size;
+    size_t start, size;
     PC pc;
+    int id;
 
-    MallocInfo() : id(0), start(0), size(0), pc(0, 0) {}
+    MallocInfo() : start(0), size(0), pc(0, 0), id(0) {}
 
     friend istream &operator>>(istream &is, MallocInfo &mal) {
         static CSVParser csv(5);
@@ -54,11 +54,16 @@ struct MallocInfo {
         if (line.empty())
             return is;
         const auto &fields = csv.read_csv_line(line);
-        mal.id = to_unsigned<size_t>(fields[0]);
+        mal.id = to_signed<int>(fields[0]);
         mal.start = to_unsigned<size_t>(fields[1]);
         mal.size = to_unsigned<size_t>(fields[2]);
-        mal.pc.func = to_unsigned<uint16_t>(fields[3]);
-        mal.pc.inst = to_unsigned<uint16_t>(fields[4]);
+        int func = to_signed<int>(fields[3]);
+        if (func == -1)
+            mal.pc = PC::null();
+        else {
+            mal.pc.func = to_unsigned<uint16_t>(fields[3]);
+            mal.pc.inst = to_unsigned<uint16_t>(fields[4]);
+        }
         return is;
     }
 
@@ -252,7 +257,7 @@ public:
     }
 
     bool valid() {
-        return m_id != -1 && !graphs.empty();
+        return !graphs.empty();
     }
 
     size_t get_n_false_sharing() const {

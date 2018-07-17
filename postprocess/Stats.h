@@ -33,9 +33,12 @@ public:
 private:
     void print_malloc() {
         layout_stream << all_fixed_mallocs.size() << '\n';
-        for (const auto &p: all_fixed_mallocs)
-            layout_stream << get<0>(p).func << ' ' << get<0>(p).inst << ' ' << get<1>(p)
-                          << ' ' << get<2>(p) << '\n';
+        for (const auto &p: all_fixed_mallocs) {
+            if (get<0>(p) == PC::null())
+                layout_stream << "-1 -1 0 " << get<2>(p) << '\n';
+            else
+                layout_stream << get<0>(p).func << ' ' << get<0>(p).inst << ' ' << get<1>(p) << ' ' << get<2>(p) << '\n';
+        }
     }
 
     void print_layout() {

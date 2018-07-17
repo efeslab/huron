@@ -108,6 +108,11 @@ struct PC {
         return inst < rhs.inst;
     }
 
+    static PC null() {
+        uint16_t max16 = (1 << 16) - 1;
+        return PC(max16, max16);
+    }
+
     friend ostream &operator<<(ostream &os, const PC &pc) {
         os << '(' << pc.func << ", " << pc.inst << ')';
         return os;
@@ -177,41 +182,6 @@ struct Segment {
         ret.push_back(last);
         return ret;
     }
-
-//    static Segment empty_seg() {
-//        return Segment(~0LU, 0);
-//    }
-
-//    static set<size_t> factorize(const set<Segment> &segs, set<vector<size_t>> &indices) {
-//        set<size_t> breakpoints;
-//        for (const auto &seg: segs) {
-//            breakpoints.insert(seg.start);
-//            breakpoints.insert(seg.end);
-//        }
-//
-//        return ret;
-//    }
-//    static set<Segment> get_uncovered(const set<Segment> &segs) {
-//        Segment rest = empty_seg();
-//        set<Segment> ret;
-//        for (const auto &seg: segs) {
-//            rest.start = min(rest.start, seg.start);
-//            rest.end = min(rest.end, seg.end);
-//        }
-//
-//        for (const auto &seg: segs) {
-//            if (rest.start >= seg.end)  // left disjoint
-//                continue;
-//            else if (seg.start <= rest.start && rest.start < seg.end)  // left cover
-//                rest.start = seg.end;
-//            else if (seg.start > rest.start && rest.start < seg.end) {
-//                ret.emplace(rest.start, seg.start);
-//                rest.start = seg.end;
-//            }
-//        }
-//
-//        return ret;
-//    }
 };
 
 namespace std {
@@ -311,9 +281,6 @@ public:
         return !is_unequal;
     }
 
-    const T &last_value() const {
-        return prev;
-    }
 private:
     T prev;
     bool is_first, is_unequal;

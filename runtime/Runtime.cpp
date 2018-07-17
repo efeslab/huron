@@ -78,7 +78,7 @@ void finalizer(void) {
            thread0_alloc.load(), total_alloc.load());
 #endif
     xthread::getInstance().flush_all_concat_to("record.log");
-    malloc_sizes.dump("malloc.txt");
+    malloc_sizes.dump("mallocRuntimeIDs.txt");
 }
 
 void *malloc_inst(size_t size, uint64_t func_id, uint64_t inst_id) {

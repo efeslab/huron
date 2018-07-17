@@ -23,8 +23,16 @@ public:
         }
     }
 
-    inline bool contain(T val) {
+    inline bool contain(T val) const {
         return start <= val && val < end;
+    }
+
+    T get_start() const {
+        return start;
+    }
+
+    T get_size() const {
+        return end - start;
     }
 };
 

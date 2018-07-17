@@ -25,7 +25,7 @@ public:
             sort(p.second.begin(), p.second.end());
             p.second = Segment::merge_neighbors(p.second);
         }
-        reclaim_unused_ranges();
+        // reclaim_unused_ranges();
         map<Segment, size_t> thread_affinity = get_thread_affinity();
         merge_segments(thread_affinity);
         map<size_t, vector<Segment>> thread_grouped;
