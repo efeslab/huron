@@ -24,13 +24,14 @@ cacheline_t *ibuffer;
 size_t bufferSize = 1 << 10, iter;
 const size_t nThreads = 4, cacheline = 64, spinlocks = 41;
 vector<size_t> indices[nThreads * 3];
+spinlock_pool *pool;
 
 void *threadFunc(void *threadIdArg) {
     size_t tid = *(size_t *)threadIdArg;
     size_t ibufferCL = (size_t)ibuffer / cacheline;
     for (size_t id: indices[tid * 3])
         for (size_t i = 0; i < iter; i++) {
-            spinlock_pool<0>::scoped_lock lock((void*)(ibufferCL + id));
+            spinlock_pool::scoped_lock lock(pool, (void*)(ibufferCL + id));
             ibuffer[id].iter();
         }
     return nullptr;
@@ -69,8 +70,10 @@ inline void *roundUp(void *addr, size_t align) {
 
 int main(int argc, char *argv[]) {
     iter = argc > 1 ? stoi(argv[1]) : 100;
-    void *mem = malloc(bufferSize * cacheline + cacheline);
-    ibuffer = new (roundUp(mem, cacheline)) cacheline_t[bufferSize]();
+    void *buffermem = malloc(bufferSize * cacheline + cacheline);
+    ibuffer = new (roundUp(buffermem, cacheline)) cacheline_t[bufferSize]();
+    void *poolmem = malloc(sizeof(spinlock_pool));
+    pool = new (poolmem) spinlock_pool();
     distribute();
     pthread_t threads[nThreads];
     size_t indices[nThreads];

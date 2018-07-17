@@ -26,15 +26,14 @@
 #include <cstdio>
 
 
-template< int I > class spinlock_pool
+class spinlock_pool
 {
 private:
-
-    static spinlock pool_[ 41 ];
+    spinlock pool_[ 41 ];
 
 public:
 
-    static spinlock & spinlock_for( void const * pv )
+    spinlock & spinlock_for( void const * pv )
     {
         std::size_t i = reinterpret_cast< std::size_t >( pv ) % 41;
         return pool_[ i ];
@@ -51,7 +50,8 @@ public:
 
     public:
 
-        explicit scoped_lock( void const * pv ): sp_( spinlock_for( pv ) )
+        explicit scoped_lock( spinlock_pool *pool, void const * pv ): 
+            sp_( pool->spinlock_for( pv ) )
         {
             sp_.lock();
         }
@@ -62,7 +62,5 @@ public:
         }
     };
 };
-
-template< int I > spinlock spinlock_pool< I >::pool_[ 41 ];
 
 #endif // #ifndef BOOST_DETAIL_SPINLOCK_POOL_HPP_INCLUDED
