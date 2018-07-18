@@ -27,9 +27,27 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
+#include <functional>
 #include <map>
 
 using namespace llvm;
+
+class LibFuncInfo {
+public:
+    typedef std::tuple<Value *, uint32_t, bool> InfoT;
+    typedef std::function<InfoT(CallInst *)> CallBackT;
+
+    LibFuncInfo(CallBackT callback): callback(callback) {}
+
+    LibFuncInfo() = default;
+
+    InfoT operator() (CallInst *inst) {
+        return callback(inst);
+    }
+
+private:
+    CallBackT callback;
+};
 
 namespace {
 
@@ -60,9 +78,14 @@ namespace {
 
         std::tuple<Value *, uint32_t, bool> getAccessInfo(Instruction *ins);
 
+        uint32_t getSizeOfAddress(Value *address);
+
+        void populatelibFuncs();
+
         DataLayout *TD;
         Function *accessCallback;
         StringMap<Function*> modifiedAllocs;
+        StringMap<LibFuncInfo> libFuncs;
         Type *intptrType, *int64Type, *boolType;
         InlineAsm *noopAsm;
     };
@@ -92,6 +115,15 @@ static cl::opt<bool> toInstrumentAtomics(
 Instrumenter::Instrumenter() : ModulePass(ID) {}
 
 StringRef Instrumenter::getPassName() const { return "Instrumenter"; }
+
+void Instrumenter::populatelibFuncs() {
+    libFuncs["pthread_mutex_lock"] = LibFuncInfo([this](CallInst *call) {
+        Value *mutex = call->getArgOperand(0);
+        uint32_t size = getSizeOfAddress(mutex);
+        return std::make_tuple(mutex, size, true);
+    });
+    libFuncs["pthread_mutex_unlock"] = libFuncs["pthread_mutex_lock"];
+}
 
 // virtual: define some initialization for the whole module
 bool Instrumenter::doInitialization(Module &M) {
@@ -132,7 +164,18 @@ bool Instrumenter::doInitialization(Module &M) {
     modifiedAllocs["posix_memalign"] = checkInterfaceFunction(M.getOrInsertFunction(
         "posix_memalign_inst", intType, voidPtrPtrType, int64Type, int64Type, int64Type, int64Type
     ));
+
+    populatelibFuncs();
+
     return true;
+}
+
+uint32_t Instrumenter::getSizeOfAddress(Value *address) {
+    Type *OrigPtrTy = address->getType();
+    Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
+    assert(OrigTy->isSized());
+    auto typeSizeBits = static_cast<uint32_t>(TD->getTypeStoreSizeInBits(OrigTy));
+    return typeSizeBits >> 3;
 }
 
 std::tuple<Value *, uint32_t, bool> Instrumenter::getAccessInfo(Instruction *ins) {
@@ -154,14 +197,19 @@ std::tuple<Value *, uint32_t, bool> Instrumenter::getAccessInfo(Instruction *ins
         isWrite = true;
         addr = toInstrumentAtomics ? XCHG->getPointerOperand() : nullptr;
     }
+    else if (CallInst *CI = dyn_cast<CallInst>(ins)) {
+        Function *callee = CI->getCalledFunction();
+        if (callee) {
+            StringRef name = callee->getName();
+            auto it = libFuncs.find(name);
+            if (it != libFuncs.end())
+                return it->second(CI);
+        }
+    }
     if (!addr)
         return std::make_tuple(addr, 0, false);
 
-    Type *OrigPtrTy = addr->getType();
-    Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
-    assert(OrigTy->isSized());
-    auto typeSizeBits = static_cast<uint32_t>(TD->getTypeStoreSizeInBits(OrigTy));
-    return std::make_tuple(addr, typeSizeBits >> 3, isWrite);
+    return std::make_tuple(addr, getSizeOfAddress(addr), isWrite);
 }
 
 bool Instrumenter::instrumentMemAccessInst(
@@ -276,7 +324,7 @@ bool Instrumenter::runOnModule(Module &M) {
                 bool processed = instrumentMemAccessInst(&*ins, funcCounter, instCounter);
                 if (processed) 
                     numInsted += (int)processed;
-                else if (CallInst *ci = dyn_cast<CallInst>(&*ins)) {
+                if (CallInst *ci = dyn_cast<CallInst>(&*ins)) {
                     Instruction *rep = getAllocsReplace(ci, funcCounter, instCounter);
                     if (rep)
                         allocsReplace.emplace_back(&*ins, rep);
