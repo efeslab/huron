@@ -13,7 +13,7 @@ void *run(void *ptr)
 {
   int start = *((int *)ptr);
   printf("%d\n",start);
-  for(int i = start; i < TOTAL; i+= THREAD_COUNT)
+  for(int i = start; i < TOTAL; i+= 4*THREAD_COUNT)
   {
     for(int j = 0; j < ITER; j++)
     {
@@ -25,6 +25,27 @@ void *run(void *ptr)
         else val+=2;
       }
       dynMemory[i]=val;
+      val=dynMemory[i+THREAD_COUNT];
+      if(j == 0)val=0;
+      else {
+        if(j%2)val+=1;
+        else val+=2;
+      }
+      dynMemory[i+THREAD_COUNT]=val;
+      val=dynMemory[i+2*THREAD_COUNT];
+      if(j == 0)val=0;
+      else {
+        if(j%2)val+=1;
+        else val+=2;
+      }
+      dynMemory[i+2*THREAD_COUNT]=val;
+      val=dynMemory[i+3*THREAD_COUNT];
+      if(j == 0)val=0;
+      else {
+        if(j%2)val+=1;
+        else val+=2;
+      }
+      dynMemory[i+3*THREAD_COUNT]=val;
       //pthread_mutex_unlock(&ownThreadLock[start*64]);
     }
   }
