@@ -169,7 +169,7 @@ void RedirectPtr::resolveThreadedFunc(Function *func, const PreCloneT &instInfos
 void RedirectPtr::replaceThreadedFuncCall(Function *func, size_t tid) {
     dbgs() << "Replacing calls in threaded function " << func->getName() << '\n';
     for (auto ins = inst_begin(func), ie = inst_begin(func); ins != ie; ++ins) {
-        CallInst *call = cast<CallInst>(&*ins);
+        CallInst *call = dyn_cast<CallInst>(&*ins);
         if (!call) continue;
         Function *callee = call->getFunction();
         auto it = this->clonedFuncs.find(callee);
