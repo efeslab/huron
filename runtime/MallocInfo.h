@@ -37,18 +37,18 @@ extern AddrSeg global;
 
 class MallocInfo {
     struct PerAddr {
-        size_t id, size, func, inst;
+        size_t id, size;
 
-        explicit PerAddr(size_t _id = 0, size_t _size = 0, size_t func = 0, size_t inst = 0)
-                : id(_id), size(_size), func(func), inst(inst) {}
+        explicit PerAddr(size_t _id = 0, size_t _size = 0)
+                : id(_id), size(_size) {}
     };
 
     struct PerBt {
         uintptr_t addr;
-        size_t id, size;
+        size_t id, size, func, inst;
 
-        explicit PerBt(uintptr_t _addr, size_t _id, size_t _size)
-                : addr(_addr), id(_id), size(_size) {}
+        explicit PerBt(uintptr_t _addr, size_t _id, size_t _size, size_t func, size_t inst)
+                : addr(_addr), id(_id), size(_size), func(func), inst(inst) {}
 
         bool operator < (const PerBt &rhs) const {
             return addr < rhs.addr;
@@ -69,15 +69,18 @@ public:
     }
 
     void dump(const char *path) const {
-        FILE *file = fopen(path, "w"); // "mallocRuntimeIDs.txt", 
+        FILE *file = fopen(path, "w");
         fprintf(file, "-1,%lu,%lu,-1,-1\n", global.get_start(), global.get_size());
-        for (const auto &p: data_alive) {
-            fprintf(file, "%lu,%lu,%lu,%lu,%lu\n", 
-                    p.second.id, p.first, p.second.size, p.second.func, p.second.inst
-            );
+        for (const auto &p: data_total) {
+            for (const auto &per_bt: p.second) {
+                fprintf(file, "%lu,%lu,%lu,%lu,%lu\n", 
+                        per_bt.id, per_bt.addr, per_bt.size, per_bt.func, per_bt.inst
+                );
+            }
         }
         fclose(file);
     }
+
     void dump_with_bt(const char *path) const {
         FILE *file = fopen(path, "w");
         assert(file);
@@ -101,10 +104,10 @@ public:
         int bt_size = backtrace(bt_buf, 1000);
         std::vector<void *> bt(bt_buf, bt_buf + bt_size);
         lock.lock();
-        data_alive[start] = PerAddr(id, size, func_id, inst_id);
+        data_alive[start] = PerAddr(id, size);
         lock.unlock();
         heap.insert(AddrSeg(start, start + size));
-        data_total[bt].emplace_back(start, id, size);
+        data_total[bt].emplace_back(start, id, size, func_id, inst_id);
         id++;
     }
 

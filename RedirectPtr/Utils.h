@@ -44,10 +44,14 @@ public:
 
     bool isCorrectInst(Instruction *inst) const {
         if (isFirst) {
-            return isa<LoadInst>(inst) || isa<StoreInst>(inst);
+            return isa<LoadInst>(inst) || isa<StoreInst>(inst) ||
+                   isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst) ||
+                   isa<CallInst>(inst);
         } else {
-            StringRef name =
-                    cast<CallInst>(inst)->getCalledFunction()->getName();
+            CallInst *ci = dyn_cast<CallInst>(inst);
+            if (!ci)
+                return false;
+            StringRef name = ci->getCalledFunction()->getName();
             return name == "malloc" || name == "calloc" || name == "realloc";
         }
     }
@@ -185,21 +189,6 @@ unsigned int getPointerOperandIndex(Instruction *inst, bool &isWrite) {
 unsigned int getPointerOperandIndex(Instruction *inst) {
     bool _dummy;
     return getPointerOperandIndex(inst, _dummy);
-}
-
-CallInst *getCallToPThread(Function *orig) {
-    std::vector<CallInst *> ret;
-    for (User *user : orig->users()) {
-        CallInst *call = cast<CallInst>(user);
-        if (!call) continue;
-        StringRef name = call->getCalledFunction()->getName();
-        if (name != "pthread_create") continue;
-        ret.push_back(call);
-    }
-    if (ret.empty())
-        return nullptr;
-    assert(ret.size() == 1 && "Multiple pthread_create calling this function");
-    return ret[0];
 }
 
 namespace std {

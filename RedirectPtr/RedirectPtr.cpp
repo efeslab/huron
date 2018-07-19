@@ -2,17 +2,17 @@
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/IR/InstIterator.h"
 
 #include <fstream>
 #include <set>
 #include <unordered_map>
-#include <llvm/IR/InstIterator.h>
 
+#include "CallGraph.h"
 #include "GroupFuncLoop.h"
 #include "Utils.h"
 
 using namespace llvm;
-
 
 namespace {
     class RedirectPtr : public ModulePass {
@@ -36,18 +36,26 @@ namespace {
 
         void loadLocInfo(std::istream &is);
 
-        void resolveThreadedFunc(Function *func, const PreCloneT &instInfos);
+        void resolveThreadedFunc(Function *func, const PreCloneT &instInfos, 
+            const std::set<size_t> &funcUserThreads);
 
-        void replaceThreadedFuncCall(Function *func, size_t tid);
+        void replaceThreadedFuncCall(size_t tid, Function *func);
+
+        void cloneFunc(Function *func, CallInst *pthread, const std::set<size_t> &threads);
 
         LLVMContext *context{};
         DataLayout *layout{};
+        CallGraphT cg{};
         // Table read and parsed from input profile file.
         std::unordered_map<std::pair<size_t, size_t>, PCInfo> profile{};
+        // Profile with all instructions found and related to Function*.
+        std::unordered_map<Function *, PreCloneT> preCloneProfile{};
         // Profile with offset replaced by pointers and PCInfo splitted (partially applied)
         std::unordered_map<Function *, PostCloneT> absPosProfile{};
         // All cloned functions.
         std::unordered_map<Function *, std::unordered_map<size_t, Function *>> clonedFuncs{};
+        // Functions' thread signatures (unique since cloned).
+        std::unordered_map<Function *, size_t> funcThread{};
     };
 
 }  // namespace
@@ -126,95 +134,148 @@ PostCloneT getEquivalentInsts(size_t tid, const ValueToValueMapTy &map, const Pr
     return ret;
 }
 
-void RedirectPtr::resolveThreadedFunc(Function *func, const PreCloneT &instInfos) {
-    // Get thread usage for each function,
-    // combined from all instructions in it.
-    // If used by more than 1 threads, provide copies.
-    std::set<size_t> funcUserThreads;
-    for (const auto &instInfoP : instInfos) {
-        std::set<size_t> threads = instInfoP.second.getThreads();
-        funcUserThreads.insert(threads.begin(), threads.end());
+void RedirectPtr::cloneFunc(Function *func, CallInst *pthread, const std::set<size_t> &threads) {
+    std::vector<std::pair<Function *, size_t>> dupFuncs;
+    auto it = this->preCloneProfile.find(func);
+    for (size_t tid : threads) {
+        // name: `func` -> `func_1` (thread 1 version)
+        std::string newName = func->getName().str() + "_" + std::to_string(tid);
+        dbgs() << func->getName() << " -> " << newName << '\n';
+        ValueToValueMapTy map;
+        Function *newFunc = CloneFunction(func, map);
+        newFunc->setName(newName);
+        dupFuncs.emplace_back(newFunc, tid);
+        if (it != this->preCloneProfile.end())
+            this->absPosProfile[newFunc] = getEquivalentInsts(tid, map, it->second);
     }
-    if (funcUserThreads.size() > 1) {
-        std::vector<std::pair<Function *, size_t>> dupFuncs;
-        CallInst *creator = getCallToPThread(func);
-        for (size_t tid : funcUserThreads) {
-            // name: `func` -> `func_1` (thread 1 version)
-            std::string newName = func->getName().str() + "_" + std::to_string(tid);
-            ValueToValueMapTy map;
-            Function *newFunc = CloneFunction(func, map);
-            newFunc->setName(newName);
-            dupFuncs.emplace_back(newFunc, tid);
-            this->absPosProfile[newFunc] = getEquivalentInsts(tid, map, instInfos);
-        }
-        if (creator) {
-            // Directly created by pthread_create.
-            // Remember to replace the function name in pthread_create call,
-            // potentially unrolling the loop around pthread_create.
-            Function *creatorFunc = creator->getParent()->getParent();
-            std::vector<Function *> cloned;
-            for (const auto &p: dupFuncs)
-                cloned.push_back(p.first);
-            this->absPosProfile[creatorFunc].emplace(creator, ThreadedPCInfo(cloned));
-        }
+    if (pthread) {
+        // Directly created by pthread_create.
+        // Remember to replace the function name in pthread_create call,
+        // potentially unrolling the loop around pthread_create.
+        Function *pthreadInFunc = pthread->getParent()->getParent();
+        std::vector<Function *> cloned;
         for (const auto &p: dupFuncs)
-            this->clonedFuncs[func].emplace(p.second, p.first);
-    } else {
-        size_t tid = funcUserThreads.empty() ? 0 : *funcUserThreads.begin();
-        for (const auto &p: instInfos)
-            this->absPosProfile[func].emplace(p.first, ThreadedPCInfo(p.second, tid));
+            cloned.push_back(p.first);
+        this->absPosProfile[pthreadInFunc].emplace(pthread, ThreadedPCInfo(cloned));
+    }
+    for (const auto &p: dupFuncs) {
+        this->clonedFuncs[func].emplace(p.second, p.first);
+        this->funcThread[p.first] = p.second;
     }
 }
 
-void RedirectPtr::replaceThreadedFuncCall(Function *func, size_t tid) {
-    dbgs() << "Replacing calls in threaded function " << func->getName() << '\n';
-    for (auto ins = inst_begin(func), ie = inst_begin(func); ins != ie; ++ins) {
-        CallInst *call = cast<CallInst>(&*ins);
-        if (!call) continue;
-        Function *callee = call->getFunction();
+void RedirectPtr::replaceThreadedFuncCall(size_t tid, Function *func) {
+    dbgs() << "Replacing calls in threaded(" << tid << ") function " << func->getName() << '\n';
+    auto findReplace = [tid, this](Function *callee) -> Function* {
+        if (!callee)
+            return nullptr;
         auto it = this->clonedFuncs.find(callee);
-        if (it == this->clonedFuncs.end()) continue;
+        if (it == this->clonedFuncs.end())
+            return nullptr;
         const auto &clones = it->second;
         auto it2 = clones.find(tid);
         assert(it2 != clones.end());
-        call->setCalledFunction(it2->second);
         dbgs() << callee->getName() << "->" << it2->second->getName() << '\n';
+        return it2->second;
+    };
+    for (auto ins = inst_begin(func), ie = inst_end(func); ins != ie; ++ins) {
+        if (CallInst *call = dyn_cast<CallInst>(&*ins)) {
+            Function *replaceCallee = findReplace(call->getCalledFunction());
+            if (!replaceCallee)
+                continue;
+            call->setCalledFunction(replaceCallee);
+        }
+        else if (InvokeInst *invoke = dyn_cast<InvokeInst>(&*ins)) {
+            Function *replaceCallee = findReplace(invoke->getCalledFunction());
+            if (!replaceCallee)
+                continue;
+            invoke->setCalledFunction(replaceCallee);
+        }
     }
 }
 
 bool RedirectPtr::runOnModule(Module &M) {
+    // Search for all pthread_create calls and create call graphs 
+    // for threaded functions.
+    std::unordered_map<Function *, CallInst *> startersPthreads;
+    dbgs() << "Searching for pthread_create:\n";
+    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb)
+        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); insb != inse; ++insb) {
+            CallInst *ci = dyn_cast<CallInst>(&*insb);
+            if (!ci)    continue;
+            Function *callee = ci->getCalledFunction();
+            if (!callee || callee->getName() != "pthread_create")
+                continue;
+            dbgs() << "Found " << *ci << "\n";
+            Function *pthread_func = cast<Function>(ci->getArgOperand(2));
+            this->cg.addStartFunc(pthread_func);
+            startersPthreads.emplace(pthread_func, ci);
+        }
+    dbgs() << "\n";
+
     // Expand functions thread-wise
     // and use pointer to locate objects (instead of offset)
     size_t funcCounter = 0;
     dbgs() << "Searching for instructions:\n";
-    for (Module::iterator fb = M.begin(), fe = M.end(); fb != fe;
-         ++fb, ++funcCounter) {
+    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb, ++funcCounter) {
         size_t instCounter = 0;
         PreCloneT instInfos;
         dbgs() << funcCounter << ' ' << fb->getName() << '\n';
-        for (Function::iterator bb = fb->begin(), be = fb->end(); bb != be;
-             ++bb) {
-            for (BasicBlock::iterator ins = bb->begin(), instE = bb->end();
-                 ins != instE; ++ins, ++instCounter) {
+        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); 
+             insb != inse; ++insb, ++instCounter) {
                 auto thisLoc = std::make_pair(funcCounter, instCounter);
                 auto it = profile.find(thisLoc);
                 if (it == profile.end()) continue;
-                ins->dump();
-                assert(it->second.isCorrectInst(&*ins));
-                instInfos[&*ins] = it->second;
-            }
+            dbgs() << funcCounter << ' ' << instCounter << *insb << '\n';
+            assert(it->second.isCorrectInst(&*insb));
+            instInfos[&*insb] = it->second;
         }
         if (instInfos.empty())
             continue;
-        this->resolveThreadedFunc(&*fb, instInfos);
+        // Get thread usage of function from instructions with an entry in profile
+        // and push that in the call graph.
+        std::set<size_t> funcUserThreads;
+        for (const auto &instInfoP : instInfos) {
+            std::set<size_t> threads = instInfoP.second.getThreads();
+            funcUserThreads.insert(threads.begin(), threads.end());
+        }
+        this->cg.hintFuncThreads(&*fb, funcUserThreads);
+        this->preCloneProfile.emplace(&*fb, instInfos);
     }
-    
-    dbgs() << "\nWorking on functions.\n";
-
+    this->cg.propagateFuncThreads();
+    dbgs() << this->cg << '\n';
     dbgs() << "\n";
-    for (const auto &p: this->clonedFuncs)
+
+    // The call graph may contain some functions not in the profile, 
+    // so we walk through it first.
+    dbgs() << "Cloning functions.\n";
+    auto cloneFunctions = this->cg.getFunctions();
+    for (const auto &f: cloneFunctions) {
+        const auto &threads = this->cg.getFuncThreads(f);
+        assert(threads.size() > 1);
+        auto it = startersPthreads.find(f);
+        CallInst *pthread = it == startersPthreads.end() ? nullptr : it->second;
+        this->cloneFunc(f, pthread, threads);
+    }
+    dbgs() << "\n";
+
+    dbgs() << "Correcting function calls.\n";
+    for (const auto &p: clonedFuncs)
         for (const auto &p2: p.second)
-            replaceThreadedFuncCall(p2.second, p2.first);
+            this->replaceThreadedFuncCall(p2.first, p2.second);
+    dbgs() << "\n";
+    
+    dbgs() << "Getting instructions in non-cloned functions.\n";
+    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb) {
+        if (cloneFunctions.find(&*fb) != cloneFunctions.end())
+            continue;
+        auto it = this->preCloneProfile.find(&*fb);
+        if (it == this->preCloneProfile.end())
+            continue;
+        // By default, thread 0.
+        for (const auto &p: it->second)
+            this->absPosProfile[&*fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
+    }
     dbgs() << "\n";
 
     for (auto &p: absPosProfile) {

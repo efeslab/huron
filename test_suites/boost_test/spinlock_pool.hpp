@@ -24,19 +24,39 @@
 #include "spinlock.hpp"
 #include <cstddef>
 #include <cstdio>
-
+#include <mutex>
 
 class spinlock_pool
 {
 private:
-    spinlock pool_[ 41 ];
+    const static size_t size = 41;
+    spinlock *pool_;
+    std::mutex *mutex_pool_;
 
 public:
+    spinlock_pool() {
+        void *mem;
+        mem = malloc(sizeof(spinlock) * size);
+        pool_ = new (mem) spinlock[size]();
+        mem = malloc(sizeof(std::mutex) * size * 3);
+        mutex_pool_ = new (mem) std::mutex[size * 3]();
+    }
 
     spinlock & spinlock_for( void const * pv )
     {
-        std::size_t i = reinterpret_cast< std::size_t >( pv ) % 41;
+        std::size_t i = reinterpret_cast< std::size_t >( pv ) % size;
         return pool_[ i ];
+    }
+
+    std::mutex & mutex_for( void const * pv )
+    {
+        std::size_t i = reinterpret_cast< std::size_t >( pv ) % size;
+        return mutex_pool_[ i * 3 ];
+    }
+
+    ~spinlock_pool() {
+        delete pool_;
+        delete mutex_pool_;
     }
 
     class scoped_lock
@@ -44,21 +64,24 @@ public:
     private:
 
         spinlock & sp_;
+        std::mutex & mutex;
 
         scoped_lock( scoped_lock const & );
         scoped_lock & operator=( scoped_lock const & );
 
     public:
 
-        explicit scoped_lock( spinlock_pool *pool, void const * pv ): 
-            sp_( pool->spinlock_for( pv ) )
+        explicit scoped_lock( spinlock_pool &pool, void const * pv ): 
+            sp_( pool.spinlock_for( pv ) ), mutex( pool.mutex_for( pv ) )
         {
+            mutex.lock();
             sp_.lock();
         }
 
         ~scoped_lock()
         {
             sp_.unlock();
+            mutex.unlock();
         }
     };
 };

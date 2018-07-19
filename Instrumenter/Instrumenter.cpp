@@ -27,9 +27,27 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
+#include <functional>
 #include <map>
 
 using namespace llvm;
+
+class LibFuncInfo {
+public:
+    typedef std::tuple<Value *, uint32_t, bool> InfoT;
+    typedef std::function<InfoT(CallInst *)> CallBackT;
+
+    LibFuncInfo(CallBackT callback): callback(callback) {}
+
+    LibFuncInfo() = default;
+
+    InfoT operator() (CallInst *inst) {
+        return callback(inst);
+    }
+
+private:
+    CallBackT callback;
+};
 
 namespace {
 
@@ -38,18 +56,6 @@ namespace {
         Instrumenter();
 
         StringRef getPassName() const override;
-
-        void instrumentMemoryAccess(Instruction *ins, unsigned long funcId,
-                                    unsigned long instCounter);
-
-        void instrumentAddress(Instruction *origIns, IRBuilder<> &IRB, Value *addr,
-                               uint32_t typeSize, bool isWrite,
-                               unsigned long funcId, unsigned long instCounter);
-
-        Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
-                                          bool isWrite, uint32_t typeBytes,
-                                          unsigned long funcId,
-                                          unsigned long instCounter);
 
         bool runOnModule(Module &M) override;
 
@@ -60,13 +66,26 @@ namespace {
         static char ID; // Pass identification, replacement for typeid
 
     private:
+        bool instrumentMemAccessInst(Instruction *ins, uint32_t funcId, uint32_t instId);
+
+        Instruction *insertAccessCallback(Instruction *insertBefore, Value *addr,
+                                          bool isWrite, uint32_t typeBytes,
+                                          uint32_t funcId, uint32_t instId);
+
         Instruction *getAllocsReplace(CallInst *ci, size_t fid, size_t iid);
 
         Function *checkInterfaceFunction(Constant *FuncOrBitcast);
 
+        std::tuple<Value *, uint32_t, bool> getAccessInfo(Instruction *ins);
+
+        uint32_t getSizeOfAddress(Value *address);
+
+        void populatelibFuncs();
+
         DataLayout *TD;
         Function *accessCallback;
         StringMap<Function*> modifiedAllocs;
+        StringMap<LibFuncInfo> libFuncs;
         Type *intptrType, *int64Type, *boolType;
         InlineAsm *noopAsm;
     };
@@ -96,6 +115,15 @@ static cl::opt<bool> toInstrumentAtomics(
 Instrumenter::Instrumenter() : ModulePass(ID) {}
 
 StringRef Instrumenter::getPassName() const { return "Instrumenter"; }
+
+void Instrumenter::populatelibFuncs() {
+    libFuncs["pthread_mutex_lock"] = LibFuncInfo([this](CallInst *call) {
+        Value *mutex = call->getArgOperand(0);
+        uint32_t size = getSizeOfAddress(mutex);
+        return std::make_tuple(mutex, size, true);
+    });
+    libFuncs["pthread_mutex_unlock"] = libFuncs["pthread_mutex_lock"];
+}
 
 // virtual: define some initialization for the whole module
 bool Instrumenter::doInitialization(Module &M) {
@@ -136,67 +164,84 @@ bool Instrumenter::doInitialization(Module &M) {
     modifiedAllocs["posix_memalign"] = checkInterfaceFunction(M.getOrInsertFunction(
         "posix_memalign_inst", intType, voidPtrPtrType, int64Type, int64Type, int64Type, int64Type
     ));
+
+    populatelibFuncs();
+
     return true;
 }
 
-// and set isWrite. Otherwise return nullptr.
-static Value *isInterestingMemoryAccess(Instruction *ins, bool *isWrite) {
-    if (LoadInst *LI = dyn_cast<LoadInst>(ins)) {
-        if (!toInstrumentReads)
-            return nullptr;
-        *isWrite = false;
-        return LI->getPointerOperand();
-    }
-    if (StoreInst *SI = dyn_cast<StoreInst>(ins)) {
-        if (!toInstrumentWrites)
-            return nullptr;
-        *isWrite = true;
-        return SI->getPointerOperand();
-    }
-    if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(ins)) {
-        if (!toInstrumentAtomics)
-            return nullptr;
-        *isWrite = true;
-        return RMW->getPointerOperand();
-    }
-    if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(ins)) {
-        if (!toInstrumentAtomics)
-            return nullptr;
-        *isWrite = true;
-        return XCHG->getPointerOperand();
-    }
-    return nullptr;
-}
-
-void Instrumenter::instrumentMemoryAccess(Instruction *ins,
-                                          unsigned long funcId,
-                                          unsigned long instCounter) {
-    bool isWrite = false;
-    Value *addr = isInterestingMemoryAccess(ins, &isWrite);
-    assert(addr);
-
-    Type *OrigPtrTy = addr->getType();
+uint32_t Instrumenter::getSizeOfAddress(Value *address) {
+    Type *OrigPtrTy = address->getType();
     Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
-
     assert(OrigTy->isSized());
     auto typeSizeBits = static_cast<uint32_t>(TD->getTypeStoreSizeInBits(OrigTy));
+    return typeSizeBits >> 3;
+}
 
-    IRBuilder<> IRB(ins);
-    instrumentAddress(ins, IRB, addr, typeSizeBits >> 3, isWrite, funcId, instCounter);
+std::tuple<Value *, uint32_t, bool> Instrumenter::getAccessInfo(Instruction *ins) {
+    bool isWrite = false;
+    Value *addr = nullptr;
+    if (LoadInst *LI = dyn_cast<LoadInst>(ins)) {
+        isWrite = false;
+        addr = toInstrumentReads ? LI->getPointerOperand() : nullptr;
+    }
+    else if (StoreInst *SI = dyn_cast<StoreInst>(ins)) {
+        isWrite = true;
+        addr = toInstrumentWrites ? SI->getPointerOperand() : nullptr;
+    }
+    else if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(ins)) {
+        isWrite = true;
+        addr = toInstrumentAtomics ? RMW->getPointerOperand() : nullptr;
+    }
+    else if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(ins)) {
+        isWrite = true;
+        addr = toInstrumentAtomics ? XCHG->getPointerOperand() : nullptr;
+    }
+    else if (CallInst *CI = dyn_cast<CallInst>(ins)) {
+        Function *callee = CI->getCalledFunction();
+        if (callee) {
+            StringRef name = callee->getName();
+            auto it = libFuncs.find(name);
+            if (it != libFuncs.end())
+                return it->second(CI);
+        }
+    }
+    if (!addr)
+        return std::make_tuple(addr, 0, false);
+
+    return std::make_tuple(addr, getSizeOfAddress(addr), isWrite);
+}
+
+bool Instrumenter::instrumentMemAccessInst(
+        Instruction *ins, uint32_t funcId, uint32_t instId) {
+    Value *addr;
+    bool isWrite;
+    uint32_t typeBytes;
+    std::tie(addr, typeBytes, isWrite) = getAccessInfo(ins);
+    if (!addr)
+        return false;
+    // Insert the callback function here.
+    insertAccessCallback(
+        ins, addr, isWrite, typeBytes, funcId, instId
+    );
+    dbgs() << "Generated function call: "
+           << (isWrite ? "store" : "load")
+           << " size = " << typeBytes
+           << " funcId, instId = " << funcId << ", " << instId << "\n";
+    return true;
 }
 
 // General function call before some given instruction
-Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
-                                                Value *addr, bool isWrite,
-                                                uint32_t typeBytes,
-                                                unsigned long funcId,
-                                                unsigned long instCounter) {
+Instruction *Instrumenter::insertAccessCallback(
+        Instruction *insertBefore, Value *addr, 
+        bool isWrite, uint32_t typeBytes, uint32_t funcId, uint32_t instId) {
     IRBuilder<> IRB(insertBefore);
+    Value *actualAddr = IRB.CreatePointerCast(addr, intptrType);
 
     std::vector<Value *> arguments;
-    arguments.push_back(addr);
+    arguments.push_back(actualAddr);
     arguments.push_back(ConstantInt::get(int64Type, funcId));
-    arguments.push_back(ConstantInt::get(int64Type, instCounter));
+    arguments.push_back(ConstantInt::get(int64Type, instId));
     arguments.push_back(ConstantInt::get(int64Type, typeBytes));
     arguments.push_back(ConstantInt::get(boolType, static_cast<uint64_t>(isWrite)));
 
@@ -208,23 +253,6 @@ Instruction *Instrumenter::insertAccessCallback(Instruction *insertBefore,
 
     IRB.CreateCall(noopAsm);
     return Call;
-}
-
-void Instrumenter::instrumentAddress(Instruction *origIns, IRBuilder<> &IRB,
-                                     Value *addr, uint32_t typeBytes,
-                                     bool isWrite, unsigned long funcId,
-                                     unsigned long instCounter) {
-
-    Value *actualAddr = IRB.CreatePointerCast(addr, intptrType);
-
-    dbgs() << "Generated function call: "
-           << (isWrite ? "store" : "load")
-           << " size = " << typeBytes
-           << " funcId, instId = " << funcId << ", " << instCounter << "\n";
-
-    // Insert the callback function here.
-    insertAccessCallback(origIns, actualAddr, isWrite, typeBytes,
-                         funcId, instCounter);
 }
 
 // Validate the result of Module::getOrInsertFunction called for an interface
@@ -288,19 +316,15 @@ bool Instrumenter::runOnModule(Module &M) {
             continue;
         funcNames.insert(std::make_pair(funcCounter, fb->getName()));
         // Fill the set of memory operations to instrument.
-        unsigned long instCounter = 0;
+        uint32_t instCounter = 0;
         std::vector<std::pair<Instruction *, Instruction *>> allocsReplace;
         for (Function::iterator bb = fb->begin(), FE = fb->end(); bb != FE; ++bb) {
             for (BasicBlock::iterator ins = bb->begin(), BE = bb->end(); ins != BE;
                  ++ins, ++instCounter) {
-                Instruction *Inst = &*ins;
-                bool isWrite;
-                if (Value *addr = isInterestingMemoryAccess(Inst, &isWrite)) {
-                    if (isLocalVariable(addr))
-                        continue;
-                    instrumentMemoryAccess(Inst, funcCounter, instCounter);
-                    numInsted++;
-                } else if (CallInst *ci = dyn_cast<CallInst>(Inst)) {
+                bool processed = instrumentMemAccessInst(&*ins, funcCounter, instCounter);
+                if (processed) 
+                    numInsted += (int)processed;
+                if (CallInst *ci = dyn_cast<CallInst>(&*ins)) {
                     Instruction *rep = getAllocsReplace(ci, funcCounter, instCounter);
                     if (rep)
                         allocsReplace.emplace_back(&*ins, rep);
