@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 #define THREAD_COUNT 4
-#define TOTAL 1024
+#define TOTAL 1024*16
 #define ITER 1000000
 
 int *dynMemory;
