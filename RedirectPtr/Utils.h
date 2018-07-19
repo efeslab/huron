@@ -191,21 +191,6 @@ unsigned int getPointerOperandIndex(Instruction *inst) {
     return getPointerOperandIndex(inst, _dummy);
 }
 
-CallInst *getCallToPThread(Function *orig) {
-    std::vector<CallInst *> ret;
-    for (User *user : orig->users()) {
-        CallInst *call = dyn_cast<CallInst>(user);
-        if (!call) continue;
-        StringRef name = call->getCalledFunction()->getName();
-        if (name != "pthread_create") continue;
-        ret.push_back(call);
-    }
-    if (ret.empty())
-        return nullptr;
-    assert(ret.size() == 1 && "Multiple pthread_create calling this function");
-    return ret[0];
-}
-
 namespace std {
     template<typename T1, typename T2>
     struct hash<std::pair<T1, T2>> {
