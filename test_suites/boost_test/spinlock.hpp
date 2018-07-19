@@ -19,7 +19,8 @@
 
 class spinlock
 {
-    std::atomic_flag locked = ATOMIC_FLAG_INIT;
+    std::atomic_flag locked;
+
 public:
     void lock() {
         while (locked.test_and_set(std::memory_order_acquire)) { ; }
