@@ -65,7 +65,10 @@ void detector::initialize(int window_size, int sample_period)
 
   orig_pthread_mutex_init(&lock,&mutex_attr);
 
-  string cmd = "/home/delozier/pin/extras/xed2-intel64/examples/xed -i ";
+  char *prefix = getenv("TMI_PREFIX");
+  if (!prefix)
+    _exit(1);
+  string cmd = string(prefix) + "/" + "xed/xed -i ";
   cmd.append(executablePath);
   cout<<"|---> fetching op info with cmd  "<<cmd<<endl;
   string output = execArbitraryShellCmd(cmd.c_str());

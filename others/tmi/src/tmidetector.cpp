@@ -2,8 +2,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
+#include <string>
 
-#define TMISO_NAME "/home/delozier/tmi/build/lib/libtmi.so"
+#define TMISO_NAME "src/.lib/libtmi.so"
 
 char *period = nullptr;
 char *windowSize = nullptr;
@@ -19,7 +20,10 @@ static void addArg(const char *name, char *value)
 
 static int run_child(int argc, char* argv[])
 { 
-  setenv("LD_PRELOAD", TMISO_NAME, 1);
+  char *prefix = getenv("TMI_PREFIX");
+  if (!prefix)
+    _exit(1);
+  setenv("LD_PRELOAD", (std::string(prefix) + "/" + TMISO_NAME).c_str(), 1);
 
   addArg("TMI_SAMPLE_PERIOD",period);
   addArg("TMI_WINDOW_SIZE",windowSize);

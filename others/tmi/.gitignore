@@ -33,3 +33,6 @@ src/.libs/
 
 test-driver
 unittests/.deps/
+xed/*.d
+xed/xed
+.gdbinit

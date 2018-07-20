@@ -23,13 +23,14 @@
 #include <set>
 #include <vector>
 #include <queue>
+#include <string>
 #include "tmi.h"
 
 #include <chrono>
 #include <iostream>
 
 // XXX PARSE MAPS to make sure we exit library
-#define TMISO_NAME "/home/delozier/tmi/build/lib/libtmiprotect.so"
+#define TMISO_NAME "src/.libs/libtmiprotect.so"
 
 typedef std::pair<pid_t,void*> context_pair;
 
@@ -310,7 +311,10 @@ static int run_child(int argc, char* argv[])
 #ifdef TMI_PROTECT
     create_shmem();
 #endif
-    setenv("LD_PRELOAD", TMISO_NAME, 1);
+    char *prefix = getenv("TMI_PREFIX");
+    if (!prefix)
+      _exit(1);
+    setenv("LD_PRELOAD", (std::string(prefix) + "/" + TMISO_NAME).c_str(), 1);
     execvp(argv[0], argv);
     printf("execvp failed!\n");
     return -1;
