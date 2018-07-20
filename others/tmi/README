@@ -1,0 +1,33 @@
+TMI provides false-sharing detection and protection capabilities for native 
+applications (C,C++,Assembly).
+
+For detection only, TMI adds an additional thread and an additional perf object
+per thread that tracks the HITM events produced by each thread.
+
+Build Parameters
+----------
+
+TMI_USING_MKSTEMP: Use the mkstemp function to create a shared file instead of
+using shm_open.  This was found to be necessary for some applications such as
+parsec.facesim.
+
+TMI_PROTECT: Enables the TMI protection mechanisms
+
+Environment Parameters
+----------
+
+TMI_SAMPLE_PERIOD: How frequently events are reported from the Intel
+hardware counters back to the TMI false-sharing detector (e.g. 
+TMI_SAMPLE_PERIOD=1000 means that every 1000th HITM event will be
+sent to the detector)
+
+TMI_WINDOW_SIZE: How frequently the detector state is cleared
+(e.g. TMI_WINDOW_SIZE=100 means that every 100th HITM event will
+cause the detector's state to be cleared)
+
+TMI_EXE_NAME: Name of the executable being run (only necessary when 
+running as an LD_PRELOAD library, otherwise will be detected from 
+command-line options) (only for detector output purposes)
+
+TMI_OUTPUT_PATH: Path to output detector results to (defaults to 
+/scratch/results)
