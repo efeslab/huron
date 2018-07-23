@@ -60,8 +60,10 @@ public:
                      std::vector<std::pair<size_t, size_t>> &re) const {
         if (isFirst) {
             auto it = allRedirects.find(tid);
-            assert(it != allRedirects.end());
-            re = it->second;
+            if (it != allRedirects.end())
+                re = it->second;
+            else
+                re.clear();
         } else
             mloc = malloc;
         return isFirst;
