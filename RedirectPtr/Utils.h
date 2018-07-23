@@ -48,6 +48,7 @@ public:
                    isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst) ||
                    isa<CallInst>(inst);
         } else {
+            // allocs are no-throw and won't be invoked.
             CallInst *ci = dyn_cast<CallInst>(inst);
             if (!ci)
                 return false;

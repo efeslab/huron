@@ -41,7 +41,7 @@ namespace {
 
         void replaceThreadedFuncCall(size_t tid, Function *func);
 
-        void cloneFunc(Function *func, CallInst *pthread, const std::set<size_t> &threads);
+        void cloneFunc(Function *func, Instruction *pthread, const std::set<size_t> &threads);
 
         LLVMContext *context{};
         DataLayout *layout{};
@@ -134,7 +134,7 @@ PostCloneT getEquivalentInsts(size_t tid, const ValueToValueMapTy &map, const Pr
     return ret;
 }
 
-void RedirectPtr::cloneFunc(Function *func, CallInst *pthread, const std::set<size_t> &threads) {
+void RedirectPtr::cloneFunc(Function *func, Instruction *pthread, const std::set<size_t> &threads) {
     std::vector<std::pair<Function *, size_t>> dupFuncs;
     auto it = this->preCloneProfile.find(func);
     for (size_t tid : threads) {
@@ -194,22 +194,36 @@ void RedirectPtr::replaceThreadedFuncCall(size_t tid, Function *func) {
     }
 }
 
+template <typename CallInvoke>
+inline Function *getThreadFuncFrom(CallInvoke *ci) {
+    const static StringRef pthread = "pthread_create";
+    Function *callee = ci->getCalledFunction();
+    if (!callee)
+        return nullptr;
+    StringRef calledName = callee->getName();
+    if (calledName == pthread)
+        return cast<Function>(ci->getArgOperand(2));
+    else
+        return nullptr;
+}
+
 bool RedirectPtr::runOnModule(Module &M) {
     // Search for all pthread_create calls and create call graphs 
     // for threaded functions.
-    std::unordered_map<Function *, CallInst *> startersPthreads;
+    std::unordered_map<Function *, Instruction *> startersPthreads;
     dbgs() << "Searching for pthread_create:\n";
     for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb)
         for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); insb != inse; ++insb) {
-            CallInst *ci = dyn_cast<CallInst>(&*insb);
-            if (!ci)    continue;
-            Function *callee = ci->getCalledFunction();
-            if (!callee || callee->getName() != "pthread_create")
-                continue;
-            dbgs() << "Found " << *ci << "\n";
-            Function *pthread_func = cast<Function>(ci->getArgOperand(2));
-            this->cg.addStartFunc(pthread_func);
-            startersPthreads.emplace(pthread_func, ci);
+            Function *pthread_func = nullptr;
+            if (CallInst *ci = dyn_cast<CallInst>(&*insb))
+                pthread_func = getThreadFuncFrom(ci);
+            else if (InvokeInst *ii = dyn_cast<InvokeInst>(&*insb))
+                pthread_func = getThreadFuncFrom(ii);
+            if (pthread_func) {
+                dbgs() << "Found " << *insb << "\n";
+                this->cg.addStartFunc(pthread_func);
+                startersPthreads.emplace(pthread_func, &*insb);
+            }
         }
     dbgs() << "\n";
 
@@ -254,7 +268,7 @@ bool RedirectPtr::runOnModule(Module &M) {
         const auto &threads = this->cg.getFuncThreads(f);
         assert(threads.size() > 1);
         auto it = startersPthreads.find(f);
-        CallInst *pthread = it == startersPthreads.end() ? nullptr : it->second;
+        Instruction *pthread = it == startersPthreads.end() ? nullptr : it->second;
         this->cloneFunc(f, pthread, threads);
     }
     dbgs() << "\n";

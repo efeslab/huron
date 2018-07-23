@@ -51,6 +51,7 @@ public:
 private:
     void replaceCallFunc(Instruction *inst, Function *newFunc) const {
         inst->dump();
+        // pthread_create cannot be invoked.
         CallInst *call = cast<CallInst>(inst);
         call->setArgOperand(2, newFunc);
     }
@@ -71,6 +72,7 @@ private:
     }
 
     void adjustMalloc(Instruction *inst, size_t sizeAdd) const {
+        // allocs are no-throw and won't be invoked.
         CallInst *call = cast<CallInst>(inst);
         Value *origSize =
                 call->getArgOperand(0);  // size is always 0th argument in allocs.
