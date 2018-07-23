@@ -1,9 +1,9 @@
-#include <thread>
 #include <vector>
 #include <iostream>
 #include <atomic>
 #include <cassert>
-
+#include <pthread.h>
+#include <array>
 
 // BOOST_SP_DISABLE_THREADS forces boost to use non-atomic refcounts, causing an assert failure at the end of the program.
 //#define BOOST_SP_USE_PTHREADS
@@ -14,7 +14,7 @@
 const unsigned NUM_THREADS = 8;
 // with 1<<28 operations total, takes about 5s to run the version with FS
 const unsigned REFCOUNT_BUMPS = 1 << 8;
-const unsigned FS_WRITES = 1 << 17;
+const unsigned FS_WRITES = 1 << 20;
 
 
 typedef struct {
@@ -36,7 +36,8 @@ Globals *G;
 
 pthread_barrier_t b;
 
-void workerThread(const int tid) {
+void *workerThread(void *tidptr) {
+  unsigned tid = *(unsigned *)tidptr;
 
   pthread_barrier_wait(&b);
 
@@ -48,6 +49,8 @@ void workerThread(const int tid) {
       G->ints[tid].i++;
     }
   }
+
+  return nullptr;
 }
 
 int main() {
@@ -63,16 +66,18 @@ int main() {
   G->sp=new int(42);
   //assert(1 == G->sp.use_count());
 
-  std::vector<std::thread*> threads;
+  std::vector<pthread_t> threads;
+  std::vector<unsigned> args;
   for (unsigned i = 0; i < NUM_THREADS; i++) {
-    std::thread* t = new std::thread(workerThread, i);
-    threads.push_back(t);
+    threads.emplace_back();
+    args.push_back(i);
   }
 
-  for (auto t : threads) {
-    t->join();
-    delete t;
-  }
+  for (size_t i = 0; i < NUM_THREADS; i++) 
+    pthread_create(&threads[i], nullptr, workerThread, &args[i]);
+
+  for (auto t : threads)
+    pthread_join(t, nullptr);
 
   // assert that sp's refcount has been tracked appropriately
   //assert(1 + (REFCOUNT_BUMPS * NUM_THREADS) == G->sp.use_count());

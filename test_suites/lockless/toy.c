@@ -4,7 +4,7 @@
 
 #define THREAD_COUNT 4
 #define TOTAL 1024*16
-#define ITER 1000000
+int ITER = 1000000;
 
 int *dynMemory;
 //pthread_mutex_t ownThreadLock[THREAD_COUNT*64];
@@ -52,8 +52,10 @@ void *run(void *ptr)
   pthread_exit(NULL);
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
+  if (argc > 1)
+    ITER = atoi(argv[1]);
   dynMemory = (int *)malloc(TOTAL*sizeof(int));
   pthread_t threads[THREAD_COUNT];
   int params[THREAD_COUNT];
