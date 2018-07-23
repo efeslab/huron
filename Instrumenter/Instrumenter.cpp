@@ -117,12 +117,12 @@ Instrumenter::Instrumenter() : ModulePass(ID) {}
 StringRef Instrumenter::getPassName() const { return "Instrumenter"; }
 
 void Instrumenter::populatelibFuncs() {
-    libFuncs["pthread_mutex_lock"] = LibFuncInfo([this](CallInst *call) {
-        Value *mutex = call->getArgOperand(0);
-        uint32_t size = getSizeOfAddress(mutex);
-        return std::make_tuple(mutex, size, true);
-    });
-    libFuncs["pthread_mutex_unlock"] = libFuncs["pthread_mutex_lock"];
+    // libFuncs["pthread_mutex_lock"] = LibFuncInfo([this](CallInst *call) {
+    //     Value *mutex = call->getArgOperand(0);
+    //     uint32_t size = getSizeOfAddress(mutex);
+    //     return std::make_tuple(mutex, size, true);
+    // });
+    // libFuncs["pthread_mutex_unlock"] = libFuncs["pthread_mutex_lock"];
 }
 
 // virtual: define some initialization for the whole module

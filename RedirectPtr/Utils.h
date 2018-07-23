@@ -45,8 +45,7 @@ public:
     bool isCorrectInst(Instruction *inst) const {
         if (isFirst) {
             return isa<LoadInst>(inst) || isa<StoreInst>(inst) ||
-                   isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst) ||
-                   isa<CallInst>(inst);
+                   isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
         } else {
             // allocs are no-throw and won't be invoked.
             CallInst *ci = dyn_cast<CallInst>(inst);
