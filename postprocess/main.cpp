@@ -245,8 +245,8 @@ public:
     explicit MallocStorageT(
             int _m_id, const MallocInfo &_m,
             const unordered_map<Segment, vector<Record>> &bucket,
-            size_t graph_threshold) :
-            minfo(_m), malloc_fs(0), after_mapped(0), m_id(_m_id) {
+            size_t graph_threshold, int _target_thread_count) :
+            minfo(_m), malloc_fs(0), after_mapped(0), m_id(_m_id), target_thread_count(_target_thread_count) {
         size_t m_start = _m.start;
         find_overlap(_m_id, m_start, bucket);
         for (const auto &p: bucket) {
@@ -276,7 +276,7 @@ public:
         for (const auto &rec: records)
             for (const auto &p: rec.pc_threads)
                 layout.insert(p.first, p.second, rec.range);
-        layout.compute();
+        layout.compute(target_thread_count);
         after_mapped = layout.get_new_size();
         return layout.get_remapping();
     }
@@ -322,9 +322,10 @@ private:
     MallocInfo minfo;
     size_t malloc_fs, after_mapped;
     int m_id;
+    int target_thread_count;
 };
 
-map<int, MallocStorageT> compute_from_log(ifstream &logf, ifstream &mf, size_t graph_threshold) {
+map<int, MallocStorageT> compute_from_log(ifstream &logf, ifstream &mf, size_t graph_threshold, int target_thread_count) {
     map<int, unordered_map<Segment, vector<Record>>> bins;
     map<int, MallocInfo> mallocs;
     map<int, MallocStorageT> ret;
@@ -344,7 +345,7 @@ map<int, MallocStorageT> compute_from_log(ifstream &logf, ifstream &mf, size_t g
     for (const auto &p: bins) {
         if (!(i++ % 1000))
             cout << "# of mallocs processed: " << i - 1 << '/' << bins.size() << endl;
-        MallocStorageT malloc_t(p.first, mallocs[p.first], p.second, graph_threshold);
+        MallocStorageT malloc_t(p.first, mallocs[p.first], p.second, graph_threshold, target_thread_count);
         if (malloc_t.valid())
             ret.emplace(p.first, move(malloc_t));
     }
@@ -353,12 +354,12 @@ map<int, MallocStorageT> compute_from_log(ifstream &logf, ifstream &mf, size_t g
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3 || argc > 5) {
-        cerr << "Usage: " << argv[0] << " logfile output [threshold] [mallocfile]" << endl;
+    if (argc < 3 || argc > 6) {
+        cerr << "Usage: " << argv[0] << " logfile output [threshold] [mallocfile] [target_thread_count]" << endl;
         return 1;
     }
     string log_path = argv[1], out_path = argv[2];
-    string malloc_path = argc == 5 ? argv[4] : "mallocRuntimeIDs.txt";
+    string malloc_path = argc > 4 ? argv[4] : "mallocRuntimeIDs.txt";
     ifstream log_file(log_path), malloc_file(malloc_path);
     if (log_file.fail() || malloc_file.fail()) {
         cerr << "Can't open file\n";
@@ -366,8 +367,9 @@ int main(int argc, char *argv[]) {
     }
     std::ios_base::sync_with_stdio(false);
     size_t threshold = (argc >= 4) ? stoul(argv[3]) : 100;
+    int target_thread_count = (argc > 5) ? atoi(argv[5]) : -1;
 
-    auto groups = compute_from_log(log_file, malloc_file, threshold);
+    auto groups = compute_from_log(log_file, malloc_file, threshold, target_thread_count);
     ofstream graphs_stream(insert_suffix(log_path, "_summary"));
 
     TransTableStat ttStat(out_path);

@@ -3,7 +3,7 @@ INCLUDE_DIR = .
 
 SRCS =  $(SOURCE_DIR)/main.cpp
 
-INCS =  $(INCLUDE_DIR)/Utils.h
+INCS =  $(INCLUDE_DIR)/Utils.h ./Layout.h
 
 DEPS = $(SRCS) $(INCS)
 

@@ -20,12 +20,21 @@ public:
         this->range_max = max(this->range_max, range.end);
     }
 
-    void compute() {
+    void compute(int target_thread_count=-1) {
         for (auto &p : this->access_relation) {
             sort(p.second.begin(), p.second.end());
             p.second = Segment::merge_neighbors(p.second);
         }
         // reclaim_unused_ranges();
+        if(target_thread_count != -1)
+        {
+            if(is_linear())
+            {
+                cout<<"The segments are linear"<<endl;
+                extra_polate(target_thread_count);
+            }
+            else cout<<"The segments are not linear"<<endl;
+        }
         map<Segment, size_t> thread_affinity = get_thread_affinity();
         merge_segments(thread_affinity);
         map<size_t, vector<Segment>> thread_grouped;
@@ -46,6 +55,129 @@ public:
     }
 
 private:
+    bool is_linear() {
+        vector<PC> thread_group, main_group;
+        map<uint32_t, bool> thread_maps;
+        for(auto &iter : this->access_relation)
+        {
+            auto pc = iter.first.first;
+            auto thread_id = iter.first.second;
+            thread_maps[thread_id] = true;
+            if(thread_id == 0) {
+                //all in the same list
+                main_group.push_back(pc);
+            } else {
+                //all in the different list
+                if(find(thread_group.begin(), thread_group.end(), pc) == thread_group.end())thread_group.push_back(pc);
+            }
+        }
+        uint32_t num_threads = thread_maps.size();
+        //handle main group
+        for(int i=0; i < main_group.size(); i++)
+        {
+            vector<Segment> ranges = this->access_relation[make_pair(main_group[i], 0)];
+            uint32_t diff, size;
+            for(int j=0; j < ranges.size() - 1; j++)
+            {
+                Segment &s1 = ranges[j];
+                Segment &s2 = ranges[j+1];
+                //cout<<s1.start<<" "<<s1.end<<" "<<s2.start<<" "<<s2.end<<endl;
+                if((s1.end - s1.start) != (s2.end - s2.start))
+                {
+                    return false;
+                }
+                if(j==0)
+                {
+                    diff = s2.end - s1.end; 
+                } else if (diff != s2.end - s1.end) {
+                    return false;
+                }
+            }
+        }
+        //handle thread group
+        for(int i=0; i < thread_group.size(); i++)
+        {
+            uint32_t diff, size;
+            for(uint32_t j=1; j < num_threads - 1; j++)
+            {
+                vector<Segment> range1 = this->access_relation[make_pair(thread_group[i],j)];
+                vector<Segment> range2 = this->access_relation[make_pair(thread_group[i],j+1)];
+                if(range1.size()!=1)return false;
+                if(range2.size()!=1)return false;
+                Segment &s1 = range1[0];
+                Segment &s2 = range2[0];
+                //cout<<s1.start<<" "<<s1.end<<" "<<s2.start<<" "<<s2.end<<endl;
+                if((s1.end - s1.start) != (s2.end - s2.start))
+                {
+                    return false;
+                }
+                if(j==1)
+                {
+                    diff = s2.end - s1.end; 
+                } else if (diff != s2.end - s1.end) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    void extra_polate(int target_thread_count)
+    {
+        if(target_thread_count == -1)return;
+        vector<PC> thread_group, main_group;
+        map<uint32_t, bool> thread_maps;
+        for(auto &iter : this->access_relation)
+        {
+            auto pc = iter.first.first;
+            auto thread_id = iter.first.second;
+            thread_maps[thread_id] = true;
+            if(thread_id == 0) {
+                //all in the same list
+                main_group.push_back(pc);
+            } else {
+                //all in the different list
+                if(find(thread_group.begin(), thread_group.end(), pc) == thread_group.end())thread_group.push_back(pc);
+            }
+        }
+        uint32_t num_threads = thread_maps.size();
+        if(num_threads - 1 >= target_thread_count)return;
+        int num_extra_threads = target_thread_count - num_threads + 1;
+        //handle main group
+        for(int i=0; i < main_group.size(); i++)
+        {
+            vector<Segment> &ranges = this->access_relation[make_pair(main_group[i], 0)];
+            uint32_t diff;
+            size_t last_start, last_end;
+            assert(ranges.size() > 1);
+            diff = ranges[1].end - ranges[0].end;
+            last_start = ranges[ranges.size()-1].start;
+            last_end = ranges[ranges.size()-1].end;
+            for(int j = 0; j < num_extra_threads; j++)
+            {
+                last_start += diff;
+                last_end += diff;
+                ranges.push_back(Segment(last_start, last_end));
+            }
+        }
+        //handle thread group
+        for(int i=0; i < thread_group.size(); i++)
+        {
+            uint32_t diff;
+            size_t last_start, last_end;
+            vector<Segment> range1 = this->access_relation[make_pair(thread_group[i],1)];
+            vector<Segment> range2 = this->access_relation[make_pair(thread_group[i],2)];
+            diff = range2[0].start - range1[0].start;
+            vector<Segment> range_last = this->access_relation[make_pair(thread_group[i],num_threads-1)];
+            last_start = range_last[0].start;
+            last_end = range_last[0].end;
+            for(uint32_t j=0; j < num_extra_threads; j++)
+            {
+                last_start+=diff;
+                last_end += diff;
+                insert(thread_group[i], j+num_threads, Segment(last_start, last_end));
+            }
+        }
+    }
     void merge_segments(map<Segment, size_t> &arg) {
         auto it = arg.begin();
         vector<pair<Segment, size_t>> overlaps_stack;
