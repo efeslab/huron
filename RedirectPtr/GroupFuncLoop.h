@@ -39,7 +39,7 @@ public:
                 replaceCallFunc(p2.first, callee);
                 c++;
             };
-            auto changeMalloc = [this, p2, &m](size_t malloc) {
+            auto changeMalloc = [this, p2, &m](long malloc) {
                 adjustMalloc(p2.first, malloc);
                 m++;
             };
@@ -71,14 +71,19 @@ private:
         inst->setOperand(index, redirectPtr);
     }
 
-    void adjustMalloc(Instruction *inst, size_t sizeAdd) const {
+    void adjustMalloc(Instruction *inst, long sizeAdd) const {
         // allocs are no-throw and won't be invoked.
         CallInst *call = cast<CallInst>(inst);
-        Value *origSize =
-                call->getArgOperand(0);  // size is always 0th argument in allocs.
+        StringRef name = call->getCalledFunction()->getName();
+        Value *origSize = nullptr;
+        if (name == "malloc")
+            origSize = call->getArgOperand(0);
+        else if (name == "calloc")
+            assert(false && "Not implemented");
+        else if (name == "realloc")
+            origSize = call->getArgOperand(1);
         IRBuilder<> IRB(inst);
-        Constant *addValue =
-                ConstantInt::get(sizeType, sizeAdd, /*isSigned=*/false);
+        Constant *addValue = ConstantInt::get(sizeType, sizeAdd, /*isSigned=*/true);
         Value *newSize = IRB.CreateAdd(origSize, addValue);
         call->setArgOperand(0, newSize);
     }

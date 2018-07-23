@@ -28,7 +28,7 @@ public:
             std::sort(p.second.begin(), p.second.end());
     }
 
-    explicit PCInfo(size_t mallocSizeAdd) :
+    explicit PCInfo(long mallocSizeAdd) :
             allRedirects(), malloc(mallocSizeAdd), isFirst(false) {}
 
     PCInfo() = default;
@@ -57,7 +57,7 @@ public:
         }
     }
 
-    bool getThreaded(size_t tid, size_t &mloc,
+    bool getThreaded(size_t tid, long &mloc,
                      std::vector<std::pair<size_t, size_t>> &re) const {
         if (isFirst) {
             auto it = allRedirects.find(tid);
@@ -75,7 +75,7 @@ private:
             size_t,
             std::vector<std::pair<size_t, size_t>>
     > allRedirects;
-    size_t malloc;
+    long malloc;
     bool isFirst;
 };
 
@@ -106,7 +106,7 @@ public:
 
     uint8_t getLoopWise(size_t loopid,
                         std::pair<size_t, size_t> &redirect,
-                        Function *&callee, size_t &mloc) const {
+                        Function *&callee, long &mloc) const {
         switch (triSwitch) {
             case 0:
                 assert(redirects.size() > loopid);
@@ -128,7 +128,7 @@ public:
 private:
     std::vector<std::pair<size_t, size_t>> redirects{};
     std::vector<Function *> dupFuncs{};
-    size_t malloc{};
+    long malloc{};
     uint8_t triSwitch{};
 };
 
@@ -160,7 +160,7 @@ public:
 private:
     std::pair<size_t, size_t> redirect;
     Function *callee{};
-    size_t malloc{};
+    long malloc{};
     uint8_t triSwitch{};
 };
 

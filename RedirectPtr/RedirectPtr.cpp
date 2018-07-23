@@ -84,9 +84,8 @@ void RedirectPtr::loadMallocInfo(std::istream &is) {
         size_t func, inst, from, to;
         is >> func >> inst >> from >> to;
         auto key = std::make_pair(func, inst);
-        assert(to >= from && "Malloc size becomes smaller after padding?");
         if (to == from) continue;  // no change needed for this malloc
-        PCInfo value(to - from);
+        PCInfo value((long)to - (long)from);
         profile.emplace(key, std::move(value));
     }
 }
