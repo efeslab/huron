@@ -104,6 +104,9 @@ int main(int argc, char *argv[])
    struct stat finfo;
     
    int req_units, num_threads, num_procs = 4, i;
+#ifdef THREADS
+   num_procs = THREADS;
+#endif
    pthread_attr_t attr;
    lreg_args* tid_args;
 
@@ -145,7 +148,7 @@ int main(int argc, char *argv[])
    memset(tid_args, 0, sizeof(lreg_args)*num_procs);
 
 	 // Assign a portion of the points for each thread
-   pthread_t tmps[8];
+   pthread_t tmps[64];
    for(i = 0; i < num_threads; i++)
    {
 	   tid_args[i].points = &points[i*req_units];

@@ -149,6 +149,10 @@ void string_match_splitter(void *data_in)
    pthread_t * tid;
    int i, num_procs = 4;
 
+#ifdef THREADS
+   num_procs = THREADS;
+#endif
+
    //CHECK_ERROR((num_procs = sysconf(_SC_NPROCESSORS_ONLN)) <= 0);
    printf("THe number of processors is %d\n", num_procs);
 

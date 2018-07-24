@@ -153,6 +153,9 @@ int main(int argc, char *argv[]) {
    int num_per_thread;
    int excess;
 
+#ifdef THREADS
+   num_procs = THREADS;
+#endif
 
    // Make sure a filename is specified
    if (argv[1] == NULL) {
