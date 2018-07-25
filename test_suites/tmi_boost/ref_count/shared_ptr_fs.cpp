@@ -24,6 +24,9 @@ typedef struct {
 #endif
 } PaddedInt;
 
+pthread_mutex_t ref_count_mutex;
+unsigned long long ref_count;
+
 typedef struct {
   int  *sp;
   //char pad0[1 << 23]; // 8MB of padding
@@ -43,8 +46,10 @@ void *workerThread(void *tidptr) {
 
   for (unsigned i = 0; i < REFCOUNT_BUMPS; i++) {
 
+    pthread_mutex_lock(&ref_count_mutex);
     G->sptrs[tid][i] = G->sp; // increments G->sp's refcount via relaxed atomic
-    
+    ref_count+=1;
+    pthread_mutex_unlock(&ref_count_mutex);
     for (unsigned j = 0; j < FS_WRITES; j++) {
       G->ints[tid].i++;
     }
@@ -55,6 +60,8 @@ void *workerThread(void *tidptr) {
 
 int main() {
   G = (Globals *) malloc(sizeof(Globals));
+  pthread_mutex_init(&ref_count_mutex, NULL);
+  ref_count = 0;
 
   pthread_barrier_init(&b,NULL,8);
 

@@ -103,6 +103,10 @@ int main(int argc, char *argv[])
 #ifdef THREADS
    num_procs = THREADS;
 #endif
+   if (argc > 2 && argv[2] != NULL)
+   {
+      num_procs = atoi(argv[2]);
+   }
 
    // Make sure a filename is specified
    if (argv[1] == NULL)
