@@ -45,11 +45,14 @@ void *workerThread(void *tidptr) {
   pthread_barrier_wait(&b);
 
   for (unsigned i = 0; i < REFCOUNT_BUMPS; i++) {
-
+#ifdef LOCKED
     pthread_mutex_lock(&ref_count_mutex);
+#endif
     G->sptrs[tid][i] = G->sp; // increments G->sp's refcount via relaxed atomic
     ref_count+=1;
+#ifdef LOCKED
     pthread_mutex_unlock(&ref_count_mutex);
+#endif
     for (unsigned j = 0; j < FS_WRITES; j++) {
       G->ints[tid].i++;
     }
