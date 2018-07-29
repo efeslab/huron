@@ -5,15 +5,14 @@
 #ifndef POSTPROCESS_UTILS_H
 #define POSTPROCESS_UTILS_H
 
-#include <sstream>
+#include <iostream>
 #include <set>
-#include <vector>
 #include <experimental/string_view>
 #include <cassert>
 #include <cstring>
+#include <vector>
 
 using std::experimental::string_view;
-using namespace std;
 
 const int CACHELINE_BIT = 6;
 
@@ -23,52 +22,7 @@ inline void hash_combine(std::size_t &s, const T &v) {
     s ^= h(v) + 0x9e3779b9 + (s << 6) + (s >> 2);
 }
 
-template<typename ContainerT, typename PredicateT>
-size_t remove_erase_count_if(ContainerT &items, const PredicateT &predicate) {
-    size_t old_size = items.size();
-    items.erase(remove_if(items.begin(), items.end(), predicate), items.end());
-    return old_size - items.size();
-}
-
-string insert_suffix(const string &path, const string &suffix) {
-    size_t slash = path.rfind('/');
-    slash = slash == string::npos ? 0 : slash + 1;
-    string basename = path.substr(slash);
-    size_t dot = basename.find('.');
-    if (dot == string::npos || dot == 0) // hidden file, not extension
-        return path + suffix;
-    else {
-        dot += slash;
-        return path.substr(0, dot) + suffix + path.substr(dot);
-    }
-}
-
-template<typename MapT>
-void print_map(ostream &os, const MapT &map) {
-    os << '{';
-    bool need_comma = false;
-    for (const auto &p: map) {
-        if (need_comma)
-            os << ", ";
-        os << p.first << ": " << p.second;
-        need_comma = true;
-    }
-    os << '}';
-}
-
-void print_bv_as_set(ostream &os, const vector<bool> &set) {
-    os << '{';
-    bool need_comma = false;
-    for (size_t i = 0; i < set.size(); i++) {
-        if (!set[i])
-            continue;
-        if (need_comma)
-            os << ", ";
-        os << i;
-        need_comma = true;
-    }
-    os << '}';
-}
+std::string insert_suffix(const std::string &path, const std::string &suffix);
 
 struct RW {
     uint32_t r, w;
@@ -85,9 +39,8 @@ struct RW {
         return *this;
     }
 
-    friend ostream &operator<<(ostream &os, const RW &rw) {
-        os << '(' << rw.r << ", " << rw.w << ')';
-        return os;
+    void dump(std::ostream &os) const {
+        os << '(' << r << ", " << w << ')';
     }
 };
 
@@ -95,6 +48,10 @@ struct PC {
     uint16_t func, inst;
 
     PC(uint16_t f, uint16_t i) : func(f), inst(i) {}
+
+    PC() {
+        *this = null();
+    }
 
     bool operator==(const PC &rhs) const {
         return func == rhs.func && inst == rhs.inst;
@@ -113,9 +70,18 @@ struct PC {
         return PC(max16, max16);
     }
 
-    friend ostream &operator<<(ostream &os, const PC &pc) {
-        os << '(' << pc.func << ", " << pc.inst << ')';
+    friend std::ostream &operator<<(std::ostream &os, const PC &pc) {
+        os << pc.func << ' ' << pc.inst;
         return os;
+    }
+
+    friend std::istream &operator>>(std::istream &is, PC &pc) {
+        is >> pc.func >> pc.inst;
+        return is;
+    }
+
+    void dump(std::ostream &os) const {
+        os << '(' << func << ", " << inst << ')';
     }
 };
 
@@ -148,27 +114,32 @@ struct Segment {
         return (start < rhs.end && end > rhs.start) || (rhs.start < end && rhs.end > start);
     }
 
-    friend ostream &operator<<(ostream &os, const Segment &seg) {
-        os << "(" << seg.start << ", " << seg.end << ")";
+    friend std::ostream &operator<<(std::ostream &os, const Segment &seg) {
+        os << seg.start << ' ' << seg.end;
         return os;
     }
 
-    Segment subtract_by(size_t sz) const {
-        return Segment(start - sz, end - sz);
+    friend std::istream &operator>>(std::istream &is, Segment &seg) {
+        is >> seg.start >> seg.end;
+        return is;
     }
 
-    bool empty() const {
-        return end <= start;
+    void dump(std::ostream &os) const {
+        os << "(" << start << ", " << end << ")";
+    }
+
+    Segment shift_by(size_t sz, bool positive) const {
+        return positive ? Segment(start + sz, end + sz) : Segment(start - sz, end - sz);
     }
 
     bool touch(const Segment &seg) const {
         return end == seg.start;
     }
 
-    static vector<Segment> merge_neighbors(const vector<Segment> &segs) {
+    static std::vector<Segment> merge_neighbors(const std::vector<Segment> &segs) {
         if (segs.empty())
-            return vector<Segment>();
-        vector<Segment> ret;
+            return std::vector<Segment>();
+        std::vector<Segment> ret;
         Segment last = segs[0];
         for (size_t i = 1; i < segs.size(); i++) {
             if (last.touch(segs[i]))
@@ -217,18 +188,18 @@ namespace std {
 }
 
 struct CSVParser {
-    vector<string_view> fields;
+    std::vector<string_view> fields;
     char delim;
 
     explicit CSVParser(size_t n_fields, char _delim = ',') : fields(n_fields), delim(_delim) {}
 
-    inline const vector<string_view> &read_csv_line(const string &line) {
+    inline const std::vector<string_view> &read_csv_line(const std::string &line) {
         size_t start = 0, end = 0;
         for (auto &field : fields) {
-            if (end == string::npos)
-                throw invalid_argument("csv malformed");
+            if (end == std::string::npos)
+                throw std::invalid_argument("csv malformed");
             void *end_ptr = memchr(line.data() + start, delim, line.length() - start);
-            end = end_ptr ? (char *) end_ptr - line.data() : string::npos;
+            end = end_ptr ? (char *) end_ptr - line.data() : std::string::npos;
             field = string_view(line).substr(start, end - start);
             start = end + 1;
         }
@@ -254,14 +225,7 @@ inline T to_signed(const string_view &str) {
     return (negative ? -val : val);
 }
 
-size_t to_address(const string_view &str) {
-    if (!(str.length() > 2 && str[0] == '0' && str[1] == 'x'))
-        throw invalid_argument("Invalid address format");
-    size_t val = 0;
-    for (size_t i = 2; i < str.size(); i++)
-        val = val * 16 + (str[i] >= 'a' ? str[i] - 'a' + 10 : str[i] - '0');
-    return val;
-}
+size_t to_address(const string_view &str);
 
 template<typename T>
 class AllEqual {
