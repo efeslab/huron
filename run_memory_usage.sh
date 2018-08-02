@@ -1,12 +1,21 @@
 #!/bin/bash
 "$@" &
 pid=$!
+#echo $pid
 while true; do
     line=$(ps auxh -q $pid)
     if [ "$line" == "" ]; then
         break;
     fi
     echo $line >> log.out
+    for child in $(pgrep -P $pid);
+    do
+      line=$(ps auxh -q $child)
+      if [ "$line" == "" ]; then
+          continue;
+      fi
+      echo $line >> log.out
+    done
     sleep 0.005
 done
 awk 'BEGIN { maxvsz=0; maxrss=0; } \
