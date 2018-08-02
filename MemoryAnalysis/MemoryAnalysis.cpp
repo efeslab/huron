@@ -89,7 +89,8 @@ namespace {
 
 char MemoryAnalysis::ID = 0;
 static RegisterPass<MemoryAnalysis> redirectptr(
-        "memoryanalysis", "Analyze max memory dependency for each PC of interest", false, false);
+        "memrange", "Analyze max memory dependency for each PC of interest", 
+        false, /*analysis pass*/true);
 static cl::opt<std::string> pcfile("pcfile", cl::desc("Specify PC file path"),
                                     cl::value_desc("filename"), cl::Required);
 
@@ -100,12 +101,15 @@ void MemoryAnalysis::loadPCs() {
         errs() << "Open file failed! Exiting.\n";
         exit(1);
     }
-    size_t mfunc, minst, n;
-    while (fin >> mfunc >> minst >> n) {
+    size_t n;
+    fin >> n;
+    for (size_t i = 0; i < n; i++) {
+        size_t mfunc, minst, msize, m;
+        fin >> mfunc >> minst >> msize >> m;
         PC mpc(mfunc, minst);
-        for (size_t i = 0; i < n; i++) {
-            size_t ifunc, iinst;
-            fin >> ifunc >> iinst;
+        for (size_t j = 0; j < m; j++) {
+            size_t start, end, ifunc, iinst, thread;
+            fin >> start >> end >> ifunc >> iinst >> thread;
             PC ipc(ifunc, iinst);
             pcToMalloc.emplace(ipc, mpc);
         }
@@ -290,7 +294,7 @@ void MemoryAnalysis::collectPrintResult(const std::map<PC, Segment> &pcResult) {
     }
     for (const auto &p: collected) {
         size_t msize = this->mallocTypeSize.find(p.first)->second;
-        dbgs() << p.first << ' ' << msize << '\n';
+        dbgs() << p.first << ' ' << msize << ' ' << p.second.size() << '\n';
         for (const auto &p2: p.second)
             dbgs() << p2.first << ' ' << p2.second << '\n';
     }
