@@ -1,17 +1,31 @@
 #include "LoggingThread.h"
 
+static inline uint64_t rdtscp (uint32_t &aux)
+{
+    uint64_t rax, rdx;
+    asm volatile ( "rdtscp\n" : "=a" (rax), "=d" (rdx), "=c" (aux) : : );
+    return (rdx << 32 ) + rax;
+}
+
 void Thread::flush_log() {
+    uint64_t time;
+    uint32_t time_aux;
+    time = rdtscp(time_aux);
     for (const auto &rw_n: this->outputBuf)
         // if (rw_n.second.second)  // if is not read-only
-        rw_n.first.dump(this->buffer_f, this->index, rw_n.second.first, rw_n.second.second);
+        rw_n.first.dump(this->buffer_f, this->index, rw_n.second.first, rw_n.second.second, time);
     this->outputBuf.clear();
+    this->access_count_in_buffer = 0;
 }
 
 void Thread::log_load_store(const LocRecord &rw, bool is_write) {
     if (!writing)
         return;
-    if (this->outputBuf.size() == LOG_SIZE)
+    if (this->outputBuf.size() == LOG_SIZE || this->access_count_in_buffer == ACCESS_THRESHOLD)
+    {
         this->flush_log();
+    }
+    this->access_count_in_buffer += 1;
     auto it = this->outputBuf.find(rw);
     if (it != this->outputBuf.end()) {
         if (is_write)
@@ -51,4 +65,5 @@ Thread::Thread(int _index, threadFunction _startRoutine, void *_startArg) :
     writing = new std::atomic<bool>;
     this->outputBuf.reserve(LOG_SIZE);
     this->open_buffer();
+    this->access_count_in_buffer = 0;
 }

@@ -4,10 +4,13 @@
 #include <pthread.h>
 #include <unordered_map>
 #include <atomic>
+#include <inttypes.h>
 
 typedef void *threadFunction(void *);
 
 const size_t LOG_SIZE = 1 << 16;
+// Memory access threshold, when access_count_in_buffer equals this threshold we flush the buffer to include timestamp
+const size_t ACCESS_THRESHOLD = 100;
 
 struct LocRecord {
     uintptr_t addr;
@@ -27,13 +30,13 @@ struct LocRecord {
 
     LocRecord() = default;
 
-    void dump(FILE *fd, int thread_fd, unsigned int r, unsigned int w) const {
+    void dump(FILE *fd, int thread_fd, unsigned int r, unsigned int w, uint64_t time) const {
         if (is_heap)
-            fprintf(fd, "%d,%p,%u,%u,%u,%u,%u,%u,%u\n",
-                thread_fd, (void *) addr, m_id, m_offset, func_id, inst_id, size, r, w);
+            fprintf(fd, "%d,%p,%u,%u,%u,%u,%u,%u,%u%" PRIu64 "\n",
+                thread_fd, (void *) addr, m_id, m_offset, func_id, inst_id, size, r, w, time);
         else
-            fprintf(fd, "%d,%p,-1,-1,%u,%u,%u,%u,%u\n",
-                    thread_fd, (void *) addr, func_id, inst_id, size, r, w);
+            fprintf(fd, "%d,%p,-1,-1,%u,%u,%u,%u,%u%" PRIu64 "\n",
+                    thread_fd, (void *) addr, func_id, inst_id, size, r, w, time);
     }
 
     bool operator==(const LocRecord &rhs) const {
@@ -86,7 +89,9 @@ struct Thread {
     int index;
     // True: malloc & pthread_create are our version.
     bool all_hooks_active;
-
+    // Number of times log_load_store function is called since flushing the buffer
+    size_t access_count_in_buffer;
+    
     Thread(int _index, threadFunction _startRoutine, void *_startArg);
 
     void flush_log();
