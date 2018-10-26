@@ -25,14 +25,6 @@ public:
         compute();
     }
 
-    multimap<PC, tuple<size_t, size_t, size_t>> get_remapping() {
-        return remapping_lines;
-    }
-
-    size_t get_new_size() {
-        return after_mapped;
-    }
-
 private:
     void insert(const PC &pc, size_t tid, const Segment &range) {
         Segment analysis_range = range;
@@ -65,7 +57,7 @@ private:
             thread_grouped[p.second].push_back(p.first);
         for (auto &p: thread_grouped)
             sort(p.second.begin(), p.second.end());
-        map<size_t, Segment> remappings = calc_remapping(thread_grouped);
+        remappings = calc_remapping(thread_grouped);
         remap(remappings);
     }
 
@@ -258,7 +250,7 @@ private:
                 offset = map_to.end;
             }
         }
-        this->after_mapped = offset;
+        this->after_mapped_size = offset;
         return remappings;
     }
 
@@ -286,9 +278,12 @@ private:
         }
     }
 
+    friend class RepairPass;
+
     map<pair<PC, size_t>, vector<Segment>> access_relation;
     multimap<PC, tuple<size_t, size_t, size_t>> remapping_lines;
-    size_t after_mapped, range_max;
+    map<size_t, Segment> remappings;
+    size_t after_mapped_size, range_max;
     int target_thread_count;
     const AnalysisResult *analysis;
     size_t m_single_size;
@@ -322,11 +317,11 @@ void RepairPass::compute() {
     for (const auto &p: input) {
         AnalysisResult *ap = analysis.empty() ? nullptr : &analysis;
         Layout layout(p.accesses, p.pc, target_thread_count, ap);
-        const auto &result = layout.get_remapping();
+        const auto &result = layout.remapping_lines;
         all_pcs_layout.insert(result.begin(), result.end());
-        size_t new_size = layout.get_new_size();
+        size_t new_size = layout.after_mapped_size;
         if (new_size != p.size)
-            all_fixed_mallocs.emplace_back(p.pc, p.size, new_size);
+            all_fixed_mallocs.emplace_back(p.pc, p.size, new_size, layout.remappings);
     }
 }
 
@@ -350,12 +345,17 @@ void RepairPass::read_from_file(ifstream &is) {
 
 void RepairPass::print_malloc(ofstream &layout_stream) {
     layout_stream << all_fixed_mallocs.size() << '\n';
-    for (const auto &p: all_fixed_mallocs) {
-        if (get<0>(p) == PC::null())
-            layout_stream << "-1 -1 0 " << get<2>(p) << '\n';
-        else
-            layout_stream << get<0>(p).func << ' ' << get<0>(p).inst << ' '
-                          << get<1>(p) << ' ' << get<2>(p) << '\n';
+    for (const auto &m: all_fixed_mallocs) {
+        if (m.pc == PC::null())
+            layout_stream << "-1 -1 0 " << m.newSize << " 0\n";
+        else {
+            layout_stream << m.pc.func << ' ' << m.pc.inst << ' '
+                          << m.origSize << ' ' << m.newSize << ' '
+                          << m.translations.size() << '\n';
+            for (size_t s: m.translations)
+                layout_stream << s << ' ';
+            layout_stream << '\n';
+        }
     }
 }
 
@@ -406,4 +406,13 @@ bool AnalysisResult::get_seg_by_pc(PC pc, Segment &seg) const {
 
 bool AnalysisResult::empty() const {
     return this->pc_replace.empty();
+}
+
+FixedMalloc::FixedMalloc(PC pc, size_t origSize, size_t newSize, const std::map<size_t, Segment> &remap):
+        pc(pc), origSize(origSize), newSize(newSize) {
+    translations.resize(origSize);
+    for (const auto &p: remap) {
+        for (size_t i = 0; i < p.second.end - p.second.start; i++)
+            translations[p.first + i] = p.second.start + i;
+    }
 }
