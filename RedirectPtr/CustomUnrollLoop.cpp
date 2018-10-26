@@ -18,6 +18,7 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SimplifyIndVar.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 
@@ -66,66 +67,6 @@ static inline void remapInstruction(Instruction *I, ValueToValueMapTy &VMap) {
                 PN->setIncomingBlock(i, cast<BasicBlock>(It->second));
         }
     }
-}
-
-/// Folds a basic block into its predecessor if it only has one predecessor, and
-/// that predecessor only has one successor.
-/// The LoopInfo Analysis that is passed will be kept consistent.
-static BasicBlock *foldBlockIntoPredecessor(BasicBlock *BB, LoopInfo *LI,
-                                            ScalarEvolution *SE,
-                                            DominatorTree *DT) {
-    // Merge basic blocks into their predecessor if there is only one distinct
-    // pred, and if there is only one distinct successor of the predecessor, and
-    // if there are no PHI nodes.
-    BasicBlock *OnlyPred = BB->getSinglePredecessor();
-    if (!OnlyPred)
-        return nullptr;
-
-    if (OnlyPred->getTerminator()->getNumSuccessors() != 1)
-        return nullptr;
-
-    LLVM_DEBUG(dbgs() << "Merging: " << *BB << "into: " << *OnlyPred);
-
-    // Resolve any PHI nodes at the start of the block.  They are all
-    // guaranteed to have exactly one entry if they exist, unless there are
-    // multiple duplicate (but guaranteed to be equal) entries for the
-    // incoming edges.  This occurs when there are multiple edges from
-    // OnlyPred to OnlySucc.
-    FoldSingleEntryPHINodes(BB);
-
-    // Delete the unconditional branch from the predecessor...
-    OnlyPred->getInstList().pop_back();
-
-    // Make all PHI nodes that referred to BB now refer to Pred as their
-    // source...
-    BB->replaceAllUsesWith(OnlyPred);
-
-    // Move all definitions in the successor to the predecessor...
-    OnlyPred->getInstList().splice(OnlyPred->end(), BB->getInstList());
-
-    // OldName will be valid until erased.
-    StringRef OldName = BB->getName();
-
-    // Erase the old block and update dominator info.
-    if (DT)
-        if (DomTreeNode *DTN = DT->getNode(BB)) {
-            DomTreeNode *PredDTN = DT->getNode(OnlyPred);
-            SmallVector<DomTreeNode *, 8> Children(DTN->begin(), DTN->end());
-            for (auto *DI : Children)
-                DT->changeImmediateDominator(DI, PredDTN);
-
-            DT->eraseNode(BB);
-        }
-
-    LI->removeBlock(BB);
-
-    // Inherit predecessor's name if it exists...
-    if (!OldName.empty() && !OnlyPred->hasName())
-        OnlyPred->setName(OldName);
-
-    BB->eraseFromParent();
-
-    return OnlyPred;
 }
 
 /// Check if unrolling created a situation where we need to insert phi nodes to
@@ -229,44 +170,44 @@ static bool isEpilogProfitable(Loop *L) {
 /// Perform some cleanup and simplifications on loops after unrolling. It is
 /// useful to simplify the IV's in the new loop, as well as do a quick
 /// simplify/dce pass of the instructions.
-static void simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
-                                    ScalarEvolution *SE, DominatorTree *DT,
-                                    AssumptionCache *AC) {
-    // Simplify any new induction variables in the partially unrolled loop.
-    if (SE && SimplifyIVs) {
-        SmallVector<WeakTrackingVH, 16> DeadInsts;
-        simplifyLoopIVs(L, SE, DT, LI, DeadInsts);
-
-        // Aggressively clean up dead instructions that simplifyLoopIVs already
-        // identified. Any remaining should be cleaned up below.
-        while (!DeadInsts.empty())
-            if (Instruction *Inst =
-                    dyn_cast_or_null<Instruction>(&*DeadInsts.pop_back_val()))
-                RecursivelyDeleteTriviallyDeadInstructions(Inst);
-    }
-
-    // At this point, the code is well formed.  We now do a quick sweep over the
-    // inserted code, doing constant propagation and dead code elimination as we
-    // go.
-    const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
-    const std::vector<BasicBlock *> &NewLoopBlocks = L->getBlocks();
-    for (BasicBlock *BB : NewLoopBlocks) {
-        for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E;) {
-            Instruction *Inst = &*I++;
-
-            if (Value *V = SimplifyInstruction(Inst, {DL, nullptr, DT, AC}))
-                if (LI->replacementPreservesLCSSAForm(Inst, V))
-                    Inst->replaceAllUsesWith(V);
-            if (isInstructionTriviallyDead(Inst))
-                BB->getInstList().erase(Inst);
-        }
-    }
-
-    // TODO: after peeling or unrolling, previously loop variant conditions are
-    // likely to fold to constants, eagerly propagating those here will require
-    // fewer cleanup passes to be run.  Alternatively, a LoopEarlyCSE might be
-    // appropriate.
-}
+//static void simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
+//                                    ScalarEvolution *SE, DominatorTree *DT,
+//                                    AssumptionCache *AC) {
+//    // Simplify any new induction variables in the partially unrolled loop.
+//    if (SE && SimplifyIVs) {
+//        SmallVector<WeakTrackingVH, 16> DeadInsts;
+//        simplifyLoopIVs(L, SE, DT, LI, DeadInsts);
+//
+//        // Aggressively clean up dead instructions that simplifyLoopIVs already
+//        // identified. Any remaining should be cleaned up below.
+//        while (!DeadInsts.empty())
+//            if (Instruction *Inst =
+//                    dyn_cast_or_null<Instruction>(&*DeadInsts.pop_back_val()))
+//                RecursivelyDeleteTriviallyDeadInstructions(Inst);
+//    }
+//
+//    // At this point, the code is well formed.  We now do a quick sweep over the
+//    // inserted code, doing constant propagation and dead code elimination as we
+//    // go.
+//    const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
+//    const std::vector<BasicBlock *> &NewLoopBlocks = L->getBlocks();
+//    for (BasicBlock *BB : NewLoopBlocks) {
+//        for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E;) {
+//            Instruction *Inst = &*I++;
+//
+//            if (Value *V = SimplifyInstruction(Inst, {DL, nullptr, DT, AC}))
+//                if (LI->replacementPreservesLCSSAForm(Inst, V))
+//                    Inst->replaceAllUsesWith(V);
+//            if (isInstructionTriviallyDead(Inst))
+//                BB->getInstList().erase(Inst);
+//        }
+//    }
+//
+//    // TODO: after peeling or unrolling, previously loop variant conditions are
+//    // likely to fold to constants, eagerly propagating those here will require
+//    // fewer cleanup passes to be run.  Alternatively, a LoopEarlyCSE might be
+//    // appropriate.
+//}
 
 /// Unroll the given loop by Count. The loop must be in LCSSA form.  Unrolling
 /// can only fail when the loop's latch block is not terminated by a conditional

@@ -198,7 +198,7 @@ struct CSVParser {
         for (auto &field : fields) {
             if (end == std::string::npos)
                 throw std::invalid_argument("csv malformed");
-            void *end_ptr = memchr(line.data() + start, delim, line.length() - start);
+            const void *end_ptr = memchr(line.data() + start, delim, line.length() - start);
             end = end_ptr ? (char *) end_ptr - line.data() : std::string::npos;
             field = string_view(line).substr(start, end - start);
             start = end + 1;

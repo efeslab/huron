@@ -237,7 +237,7 @@ private:
                 size_t gap_usage = 0;
                 for (size_t j = gap.start; j < gap.end; j++)
                     gap_usage |= affinity_bitmap[j];
-                if (gap_usage == 1 << p.first.second || gap_usage == 0) {
+                if (gap_usage == 1U << p.first.second || gap_usage == 0) {
                     it = p.second.erase(it - 1, it + 1);
                     it = p.second.emplace(it, prev.start, next.end);
                 } else
