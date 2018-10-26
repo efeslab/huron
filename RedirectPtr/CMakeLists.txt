@@ -2,6 +2,8 @@ add_llvm_loadable_module(
         LLVMRedirectPtr
         CustomUnrollLoop.cpp
         RedirectPtr.cpp
+        GroupFuncLoop.cpp
+        Utils.cpp
         PLUGIN_TOOL
         opt
 )

@@ -182,31 +182,9 @@ typedef std::unordered_map<Instruction *, PCInfo> PreCloneT;
 typedef std::unordered_map<Instruction *, ThreadedPCInfo> PostCloneT;
 typedef std::unordered_map<Instruction *, ExpandedPCInfo> PostUnrollT;
 
-unsigned int getPointerOperandIndex(Instruction *inst, bool &isWrite) {
-    if (isa<LoadInst>(inst)) {
-        isWrite = false;
-        return LoadInst::getPointerOperandIndex();
-    }
-    if (isa<StoreInst>(inst)) {
-        isWrite = true;
-        return StoreInst::getPointerOperandIndex();
-    }
-    if (isa<AtomicRMWInst>(inst)) {
-        isWrite = true;
-        return AtomicRMWInst::getPointerOperandIndex();
-    }
-    if (isa<AtomicCmpXchgInst>(inst)) {
-        isWrite = true;
-        return AtomicCmpXchgInst::getPointerOperandIndex();
-    }
-    errs() << "Instruction is not load/store!";
-    assert(false);
-}
+unsigned int getPointerOperandIndex(Instruction *inst, bool &isWrite);
 
-unsigned int getPointerOperandIndex(Instruction *inst) {
-    bool _dummy;
-    return getPointerOperandIndex(inst, _dummy);
-}
+unsigned int getPointerOperandIndex(Instruction *inst);
 
 namespace std {
     template<typename T1, typename T2>
