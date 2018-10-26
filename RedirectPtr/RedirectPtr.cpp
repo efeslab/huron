@@ -181,13 +181,13 @@ void RedirectPtr::replaceThreadedFuncCall(size_t tid, Function *func) {
         return it2->second;
     };
     for (auto ins = inst_begin(func), ie = inst_end(func); ins != ie; ++ins) {
-        if (CallInst *call = dyn_cast<CallInst>(&*ins)) {
+        if (auto *call = dyn_cast<CallInst>(&*ins)) {
             Function *replaceCallee = findReplace(call->getCalledFunction());
             if (!replaceCallee)
                 continue;
             call->setCalledFunction(replaceCallee);
         }
-        else if (InvokeInst *invoke = dyn_cast<InvokeInst>(&*ins)) {
+        else if (auto *invoke = dyn_cast<InvokeInst>(&*ins)) {
             Function *replaceCallee = findReplace(invoke->getCalledFunction());
             if (!replaceCallee)
                 continue;
@@ -214,12 +214,12 @@ bool RedirectPtr::runOnModule(Module &M) {
     // for threaded functions.
     std::unordered_map<Function *, Instruction *> startersPthreads;
     dbgs() << "Searching for pthread_create:\n";
-    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb)
-        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); insb != inse; ++insb) {
+    for (auto &fb : M)
+        for (auto insb = inst_begin(&fb), inse = inst_end(&fb); insb != inse; ++insb) {
             Function *pthread_func = nullptr;
-            if (CallInst *ci = dyn_cast<CallInst>(&*insb))
+            if (auto *ci = dyn_cast<CallInst>(&*insb))
                 pthread_func = getThreadFuncFrom(ci);
-            else if (InvokeInst *ii = dyn_cast<InvokeInst>(&*insb))
+            else if (auto *ii = dyn_cast<InvokeInst>(&*insb))
                 pthread_func = getThreadFuncFrom(ii);
             if (pthread_func) {
                 dbgs() << "Found " << *insb << "\n";
@@ -282,15 +282,15 @@ bool RedirectPtr::runOnModule(Module &M) {
     dbgs() << "\n";
     
     dbgs() << "Getting instructions in non-cloned functions.\n";
-    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb) {
-        if (cloneFunctions.find(&*fb) != cloneFunctions.end())
+    for (auto &fb : M) {
+        if (cloneFunctions.find(&fb) != cloneFunctions.end())
             continue;
-        auto it = this->preCloneProfile.find(&*fb);
+        auto it = this->preCloneProfile.find(&fb);
         if (it == this->preCloneProfile.end())
             continue;
         // By default, thread 0.
         for (const auto &p: it->second)
-            this->absPosProfile[&*fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
+            this->absPosProfile[&fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
     }
     dbgs() << "\n";
 

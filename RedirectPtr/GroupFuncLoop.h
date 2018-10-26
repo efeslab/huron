@@ -52,7 +52,7 @@ private:
     void replaceCallFunc(Instruction *inst, Function *newFunc) const {
         inst->dump();
         // pthread_create cannot be invoked.
-        CallInst *call = cast<CallInst>(inst);
+        auto *call = cast<CallInst>(inst);
         call->setArgOperand(2, newFunc);
     }
 
@@ -63,7 +63,7 @@ private:
         IRBuilder<> IRB(inst);
         // Add offset to uint64_t value of the pointer using an `add` instruction.
         Constant *offsetValue =
-                ConstantInt::get(intPtrType, offset, /*isSigned=*/true);
+                ConstantInt::get(intPtrType, static_cast<uint64_t>(offset), /*isSigned=*/true);
         Value *actualAddrInt = IRB.CreatePointerCast(pointer, intPtrType);
         Value *redirectAddrInt = IRB.CreateAdd(actualAddrInt, offsetValue);
         Value *redirectPtr = IRB.CreateIntToPtr(
@@ -73,7 +73,7 @@ private:
 
     void adjustMalloc(Instruction *inst, long sizeAdd) const {
         // allocs are no-throw and won't be invoked.
-        CallInst *call = cast<CallInst>(inst);
+        auto *call = cast<CallInst>(inst);
         StringRef name = call->getCalledFunction()->getName();
         Value *origSize = nullptr;
         if (name == "malloc")
@@ -83,7 +83,7 @@ private:
         else if (name == "realloc")
             origSize = call->getArgOperand(1);
         IRBuilder<> IRB(inst);
-        Constant *addValue = ConstantInt::get(sizeType, sizeAdd, /*isSigned=*/true);
+        Constant *addValue = ConstantInt::get(sizeType, static_cast<uint64_t>(sizeAdd), /*isSigned=*/true);
         Value *newSize = IRB.CreateAdd(origSize, addValue);
         call->setArgOperand(0, newSize);
     }

@@ -1,3 +1,5 @@
+#include <utility>
+
 //
 // Created by yifanz on 6/27/18.
 //
@@ -61,7 +63,7 @@ public:
                    isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
         } else {
             // allocs are no-throw and won't be invoked.
-            CallInst *ci = dyn_cast<CallInst>(inst);
+            auto *ci = dyn_cast<CallInst>(inst);
             if (!ci)
                 return false;
             StringRef name = ci->getCalledFunction()->getName();
@@ -98,8 +100,8 @@ public:
         triSwitch = (uint8_t) (isRedirect ? 0 : 2);
     }
 
-    explicit ThreadedPCInfo(const std::vector<Function *> &dupFuncs) :
-            dupFuncs(dupFuncs), triSwitch(1) {}
+    explicit ThreadedPCInfo(std::vector<Function *> dupFuncs) :
+            dupFuncs(std::move(dupFuncs)), triSwitch(1) {}
 
     ThreadedPCInfo() = default;
 
@@ -181,21 +183,21 @@ typedef std::unordered_map<Instruction *, ThreadedPCInfo> PostCloneT;
 typedef std::unordered_map<Instruction *, ExpandedPCInfo> PostUnrollT;
 
 unsigned int getPointerOperandIndex(Instruction *inst, bool &isWrite) {
-    if (LoadInst *LI = dyn_cast<LoadInst>(inst)) {
+    if (isa<LoadInst>(inst)) {
         isWrite = false;
-        return LI->getPointerOperandIndex();
+        return LoadInst::getPointerOperandIndex();
     }
-    if (StoreInst *SI = dyn_cast<StoreInst>(inst)) {
+    if (isa<StoreInst>(inst)) {
         isWrite = true;
-        return SI->getPointerOperandIndex();
+        return StoreInst::getPointerOperandIndex();
     }
-    if (AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(inst)) {
+    if (isa<AtomicRMWInst>(inst)) {
         isWrite = true;
-        return RMW->getPointerOperandIndex();
+        return AtomicRMWInst::getPointerOperandIndex();
     }
-    if (AtomicCmpXchgInst *XCHG = dyn_cast<AtomicCmpXchgInst>(inst)) {
+    if (isa<AtomicCmpXchgInst>(inst)) {
         isWrite = true;
-        return XCHG->getPointerOperandIndex();
+        return AtomicCmpXchgInst::getPointerOperandIndex();
     }
     errs() << "Instruction is not load/store!";
     assert(false);
