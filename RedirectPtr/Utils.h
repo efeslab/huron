@@ -7,7 +7,10 @@
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IRBuilder.h"
+
 #include <cassert>
+#include <set>
+#include <unordered_map>
 
 using namespace llvm;
 
@@ -15,10 +18,20 @@ using namespace llvm;
 #define LLVM_DEBUG(X) {X;}
 #endif
 
+struct MallocInfo {
+    long sizeDelta{};
+    std::vector<size_t> remaps;
+
+    MallocInfo(long sizeDelta, std::vector<size_t> &&remaps):
+        sizeDelta(sizeDelta), remaps(move(remaps)) {}
+
+    MallocInfo() = default;
+};
+
 class PCInfo {
 public:
     explicit PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines)
-            : malloc(), isFirst(true) {
+            : isRedirect(true) {
         for (const auto &tup : lines) {
             size_t tid, from, to;
             std::tie(tid, from, to) = tup;
@@ -28,13 +41,13 @@ public:
             std::sort(p.second.begin(), p.second.end());
     }
 
-    explicit PCInfo(long mallocSizeAdd) :
-            allRedirects(), malloc(mallocSizeAdd), isFirst(false) {}
+    explicit PCInfo(long mallocSizeDelta, std::vector<size_t> &&mallocRemaps) :
+            malloc(mallocSizeDelta, move(mallocRemaps)), isRedirect(false) {}
 
     PCInfo() = default;
 
     std::set<size_t> getThreads() const {
-        if (isFirst) {
+        if (isRedirect) {
             std::set<size_t> threads;
             for (const auto &p: allRedirects)
                 threads.insert(p.first);
@@ -43,7 +56,7 @@ public:
     }
 
     bool isCorrectInst(Instruction *inst) const {
-        if (isFirst) {
+        if (isRedirect) {
             return isa<LoadInst>(inst) || isa<StoreInst>(inst) ||
                    isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
         } else {
@@ -56,9 +69,9 @@ public:
         }
     }
 
-    bool getThreaded(size_t tid, long &mloc,
+    bool getThreaded(size_t tid, MallocInfo &mloc,
                      std::vector<std::pair<size_t, size_t>> &re) const {
-        if (isFirst) {
+        if (isRedirect) {
             auto it = allRedirects.find(tid);
             if (it != allRedirects.end())
                 re = it->second;
@@ -66,7 +79,7 @@ public:
                 re.clear();
         } else
             mloc = malloc;
-        return isFirst;
+        return isRedirect;
     }
 
 private:
@@ -74,8 +87,8 @@ private:
             size_t,
             std::vector<std::pair<size_t, size_t>>
     > allRedirects;
-    long malloc;
-    bool isFirst;
+    MallocInfo malloc;
+    bool isRedirect;
 };
 
 class ThreadedPCInfo {
@@ -105,7 +118,7 @@ public:
 
     uint8_t getLoopWise(size_t loopid,
                         std::pair<size_t, size_t> &redirect,
-                        Function *&callee, long &mloc) const {
+                        Function *&callee, MallocInfo &mloc) const {
         switch (triSwitch) {
             case 0:
                 assert(redirects.size() > loopid);
@@ -127,7 +140,7 @@ public:
 private:
     std::vector<std::pair<size_t, size_t>> redirects{};
     std::vector<Function *> dupFuncs{};
-    long malloc{};
+    MallocInfo malloc{};
     uint8_t triSwitch{};
 };
 
@@ -159,7 +172,7 @@ public:
 private:
     std::pair<size_t, size_t> redirect;
     Function *callee{};
-    long malloc{};
+    MallocInfo malloc{};
     uint8_t triSwitch{};
 };
 

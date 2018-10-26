@@ -347,11 +347,10 @@ void RepairPass::print_malloc(ofstream &layout_stream) {
     layout_stream << all_fixed_mallocs.size() << '\n';
     for (const auto &m: all_fixed_mallocs) {
         if (m.pc == PC::null())
-            layout_stream << "-1 -1 0 " << m.newSize << " 0\n";
+            layout_stream << "-1 -1 0 " << m.newSize << "\n";
         else {
             layout_stream << m.pc.func << ' ' << m.pc.inst << ' '
-                          << m.origSize << ' ' << m.newSize << ' '
-                          << m.translations.size() << '\n';
+                          << m.origSize << ' ' << m.newSize << '\n';
             for (size_t s: m.translations)
                 layout_stream << s << ' ';
             layout_stream << '\n';

@@ -36,9 +36,6 @@ namespace {
 
         void loadLocInfo(std::istream &is);
 
-        void resolveThreadedFunc(Function *func, const PreCloneT &instInfos, 
-            const std::set<size_t> &funcUserThreads);
-
         void replaceThreadedFuncCall(size_t tid, Function *func);
 
         void cloneFunc(Function *func, Instruction *pthread, const std::set<size_t> &threads);
@@ -83,9 +80,15 @@ void RedirectPtr::loadMallocInfo(std::istream &is) {
     for (size_t i = 0; i < n; i++) {
         size_t func, inst, from, to;
         is >> func >> inst >> from >> to;
+        std::vector<size_t> remaps;
+        for (size_t j = 0; j < from; j++) {
+            size_t next;
+            is >> next;
+            remaps.push_back(next);
+        }
         auto key = std::make_pair(func, inst);
         if (to == from) continue;  // no change needed for this malloc
-        PCInfo value((long)to - (long)from);
+        PCInfo value((long)to - (long)from, std::move(remaps));
         profile.emplace(key, std::move(value));
     }
 }

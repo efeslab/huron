@@ -39,8 +39,8 @@ public:
                 replaceCallFunc(p2.first, callee);
                 c++;
             };
-            auto changeMalloc = [this, p2, &m](long malloc) {
-                adjustMalloc(p2.first, malloc);
+            auto changeMalloc = [this, p2, &m](const MallocInfo &malloc) {
+                adjustMalloc(p2.first, malloc.sizeDelta);
                 m++;
             };
             p2.second.actOn(changeOffset, changeCallee, changeMalloc);
