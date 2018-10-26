@@ -230,7 +230,7 @@ size_t to_address(const string_view &str);
 template<typename T>
 class AllEqual {
 public:
-    AllEqual() : is_first(true), is_unequal(false) {}
+    AllEqual() : prev(), is_first(true), is_unequal(false) {}
 
     void next(const T &t) {
         if (is_unequal)

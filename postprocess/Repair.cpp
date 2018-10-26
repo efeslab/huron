@@ -96,7 +96,7 @@ private:
         }
         //handle thread group
         for (auto &i : thread_group) {
-            size_t diff;
+            size_t diff = 0;
             for (uint32_t j = 1; j < num_threads - 1; j++) {
                 vector<Segment> range1 = this->access_relation[make_pair(i, j)];
                 vector<Segment> range2 = this->access_relation[make_pair(i, j + 1)];

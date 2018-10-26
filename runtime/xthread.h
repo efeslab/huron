@@ -100,9 +100,9 @@ public:
         for (auto &th: _threads) {
             th.stop_logging();
             std::string cat_cmd = "cat " + th.get_filename() + " >> " + output_name;
-            system(cat_cmd.c_str());
+            assert(system(cat_cmd.c_str()) == 0);
             std::string rm_cmd = "rm " + th.get_filename();
-            system(rm_cmd.c_str());
+            assert(system(rm_cmd.c_str()) == 0);
         }
         // std::string wc_out_cmd = "wc -l " + output_name;
         // system(wc_out_cmd.c_str());
