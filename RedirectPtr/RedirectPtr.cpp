@@ -42,8 +42,11 @@ namespace {
 
         void makeMallocTable(Module &M);
 
+        void locateInstructions(Module &M, CallGraphT *cg);
+
+        void buildAbsPosProfile(Module &M);
+
         size_t mallocN{};
-        CallGraphT cg{};
         std::vector<std::vector<size_t>> mallocOffsets{};
         // Table read and parsed from input profile file.
         std::unordered_map<std::pair<size_t, size_t>, PCInfo> profile{};
@@ -212,89 +215,7 @@ inline Function *getThreadFuncFrom(CallInvoke *ci) {
 bool RedirectPtr::runOnModule(Module &M) {
     makeMallocTable(M);
 
-    // Search for all pthread_create calls and create call graphs 
-    // for threaded functions.
-    std::unordered_map<Function *, Instruction *> startersPthreads;
-    dbgs() << "Searching for pthread_create:\n";
-    for (auto &fb : M)
-        for (auto insb = inst_begin(&fb), inse = inst_end(&fb); insb != inse; ++insb) {
-            Function *pthread_func = nullptr;
-            if (auto *ci = dyn_cast<CallInst>(&*insb))
-                pthread_func = getThreadFuncFrom(ci);
-            else if (auto *ii = dyn_cast<InvokeInst>(&*insb))
-                pthread_func = getThreadFuncFrom(ii);
-            if (pthread_func) {
-                dbgs() << "Found " << *insb << "\n";
-                this->cg.addStartFunc(pthread_func);
-                startersPthreads.emplace(pthread_func, &*insb);
-            }
-        }
-    dbgs() << "\n";
-
-    // Expand functions thread-wise
-    // and use pointer to locate objects (instead of offset)
-    size_t funcCounter = 0;
-    dbgs() << "Searching for instructions:\n";
-    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb, ++funcCounter) {
-        size_t instCounter = 0;
-        PreCloneT instInfos;
-        dbgs() << funcCounter << ' ' << fb->getName() << '\n';
-        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); 
-             insb != inse; ++insb, ++instCounter) {
-                auto thisLoc = std::make_pair(funcCounter, instCounter);
-                auto it = profile.find(thisLoc);
-                if (it == profile.end()) continue;
-            dbgs() << funcCounter << ' ' << instCounter << *insb << '\n';
-            assert(it->second.isCorrectInst(&*insb));
-            instInfos[&*insb] = it->second;
-        }
-        if (instInfos.empty())
-            continue;
-        // Get thread usage of function from instructions with an entry in profile
-        // and push that in the call graph.
-        std::set<size_t> funcUserThreads;
-        for (const auto &instInfoP : instInfos) {
-            std::set<size_t> threads = instInfoP.second.getThreads();
-            funcUserThreads.insert(threads.begin(), threads.end());
-        }
-        this->cg.hintFuncThreads(&*fb, funcUserThreads);
-        this->preCloneProfile.emplace(&*fb, instInfos);
-    }
-    this->cg.propagateFuncThreads();
-    dbgs() << this->cg << '\n';
-    dbgs() << "\n";
-
-    // The call graph may contain some functions not in the profile, 
-    // so we walk through it first.
-    dbgs() << "Cloning functions.\n";
-    auto cloneFunctions = this->cg.getFunctions();
-    for (const auto &f: cloneFunctions) {
-        const auto &threads = this->cg.getFuncThreads(f);
-        assert(threads.size() > 1);
-        auto it = startersPthreads.find(f);
-        Instruction *pthread = it == startersPthreads.end() ? nullptr : it->second;
-        this->cloneFunc(f, pthread, threads);
-    }
-    dbgs() << "\n";
-
-    dbgs() << "Correcting function calls.\n";
-    for (const auto &p: clonedFuncs)
-        for (const auto &p2: p.second)
-            this->replaceThreadedFuncCall(p2.first, p2.second);
-    dbgs() << "\n";
-    
-    dbgs() << "Getting instructions in non-cloned functions.\n";
-    for (auto &fb : M) {
-        if (cloneFunctions.find(&fb) != cloneFunctions.end())
-            continue;
-        auto it = this->preCloneProfile.find(&fb);
-        if (it == this->preCloneProfile.end())
-            continue;
-        // By default, thread 0.
-        for (const auto &p: it->second)
-            this->absPosProfile[&fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
-    }
-    dbgs() << "\n";
+    buildAbsPosProfile(M);
 
     for (auto &p: absPosProfile) {
         GroupFuncLoop funcPass(this, &M, p.first, p.second);
@@ -327,4 +248,97 @@ void RedirectPtr::makeMallocTable(Module &M) {
     new GlobalVariable(
             M, arrayType, /*isConstant=*/true, GlobalValue::PrivateLinkage, init, "__malloc_offset_table"
     );
+}
+
+void RedirectPtr::locateInstructions(Module &M, CallGraphT *cg) {
+    // Expand functions thread-wise
+    // and use pointer to locate objects (instead of offset)
+    size_t funcCounter = 0;
+    dbgs() << "Searching for instructions:\n";
+    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb, ++funcCounter) {
+        size_t instCounter = 0;
+        PreCloneT instInfos;
+        dbgs() << funcCounter << ' ' << fb->getName() << '\n';
+        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb);
+             insb != inse; ++insb, ++instCounter) {
+            auto thisLoc = std::make_pair(funcCounter, instCounter);
+            auto it = this->profile.find(thisLoc);
+            if (it == this->profile.end()) continue;
+            dbgs() << funcCounter << ' ' << instCounter << *insb << '\n';
+            assert(it->second.isCorrectInst(&*insb));
+            instInfos[&*insb] = it->second;
+        }
+        if (instInfos.empty())
+            continue;
+        // Get thread usage of function from instructions with an entry in profile
+        // and push that in the call graph.
+        std::set<size_t> funcUserThreads;
+        for (const auto &instInfoP : instInfos) {
+            std::set<size_t> threads = instInfoP.second.getThreads();
+            funcUserThreads.insert(threads.begin(), threads.end());
+        }
+        if (cg)
+            cg->hintFuncThreads(&*fb, funcUserThreads);
+        this->preCloneProfile.emplace(&*fb, instInfos);
+    }
+}
+
+void RedirectPtr::buildAbsPosProfile(Module &M) {
+    // Search for all pthread_create calls and create call graphs
+    // for threaded functions.
+    std::unordered_map<Function *, Instruction *> startersPthreads;
+    CallGraphT cg;
+    dbgs() << "Searching for pthread_create:\n";
+    for (auto &fb : M) {
+        for (auto insb = inst_begin(&fb), inse = inst_end(&fb); insb != inse; ++insb) {
+            Function *pthread_func = nullptr;
+            if (auto *ci = dyn_cast<CallInst>(&*insb))
+                pthread_func = getThreadFuncFrom(ci);
+            else if (auto *ii = dyn_cast<InvokeInst>(&*insb))
+                pthread_func = getThreadFuncFrom(ii);
+            if (pthread_func) {
+                dbgs() << "Found " << *insb << "\n";
+                cg.addStartFunc(pthread_func);
+                startersPthreads.emplace(pthread_func, &*insb);
+            }
+        }
+    }
+    dbgs() << "\n";
+
+    locateInstructions(M, &cg);
+    cg.propagateFuncThreads();
+    dbgs() << cg << '\n';
+    dbgs() << "\n";
+
+    // The call graph may contain some functions not in the profile,
+    // so we walk through it first.
+    dbgs() << "Cloning functions.\n";
+    auto cloneFunctions = cg.getFunctions();
+    for (const auto &f: cloneFunctions) {
+        const auto &threads = cg.getFuncThreads(f);
+        assert(threads.size() > 1);
+        auto it = startersPthreads.find(f);
+        Instruction *pthread = it == startersPthreads.end() ? nullptr : it->second;
+        this->cloneFunc(f, pthread, threads);
+    }
+    dbgs() << "\n";
+
+    dbgs() << "Correcting function calls.\n";
+    for (const auto &p: clonedFuncs)
+        for (const auto &p2: p.second)
+            this->replaceThreadedFuncCall(p2.first, p2.second);
+    dbgs() << "\n";
+
+    dbgs() << "Getting instructions in non-cloned functions.\n";
+    for (auto &fb : M) {
+        if (clonedFuncs.find(&fb) != clonedFuncs.end())
+            continue;
+        auto it = this->preCloneProfile.find(&fb);
+        if (it == this->preCloneProfile.end())
+            continue;
+        // By default, thread 0.
+        for (const auto &p: it->second)
+            this->absPosProfile[&fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
+    }
+    dbgs() << "\n";
 }
