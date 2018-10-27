@@ -5,7 +5,9 @@
 #ifndef HURON_GROUPFUNCLOOP_H
 #define HURON_GROUPFUNCLOOP_H
 
-#include "UnrollLoopPass.h"
+#include <llvm/Analysis/LoopInfo.h>
+
+#include "Utils.h"
 
 class GroupFuncLoop {
 public:
@@ -22,6 +24,7 @@ private:
 
     void adjustMalloc(Instruction *inst, const MallocInfo &malloc) const;
 
+    Module *module{};
     LLVMContext *context{};
     DataLayout *layout{};
     Function *func{};

@@ -41,8 +41,7 @@ PCInfo::PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines)
         std::sort(p.second.begin(), p.second.end());
 }
 
-PCInfo::PCInfo(size_t id, long mallocSizeDelta, std::vector<size_t> &&mallocRemaps) :
-        malloc(id, mallocSizeDelta, move(mallocRemaps)), isRedirect(false) {}
+PCInfo::PCInfo(size_t id, long mallocSizeDelta): malloc(id, mallocSizeDelta), isRedirect(false) {}
 
 std::set<size_t> PCInfo::getThreads() const {
     if (isRedirect) {

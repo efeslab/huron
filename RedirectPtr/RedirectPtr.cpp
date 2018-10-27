@@ -40,7 +40,7 @@ namespace {
 
         void cloneFunc(Function *func, Instruction *pthread, const std::set<size_t> &threads);
 
-        void makeMallocTable(Module &M);
+        void makeMallocTables(Module &M);
 
         void locateInstructions(Module &M, CallGraphT *cg);
 
@@ -92,8 +92,8 @@ void RedirectPtr::loadMallocInfo(std::istream &is) {
         }
         auto key = std::make_pair(func, inst);
         if (to == from) continue;  // no change needed for this malloc
-        mallocOffsets.push_back(remaps);
-        PCInfo value(i, (long)to - (long)from, std::move(remaps));
+        mallocOffsets.emplace_back(std::move(remaps));
+        PCInfo value(i, (long)to - (long)from);
         profile.emplace(key, std::move(value));
     }
 }
@@ -213,7 +213,7 @@ inline Function *getThreadFuncFrom(CallInvoke *ci) {
 }
 
 bool RedirectPtr::runOnModule(Module &M) {
-    makeMallocTable(M);
+    makeMallocTables(M);
 
     buildAbsPosProfile(M);
 
@@ -225,7 +225,7 @@ bool RedirectPtr::runOnModule(Module &M) {
     return true;
 }
 
-void RedirectPtr::makeMallocTable(Module &M) {
+void RedirectPtr::makeMallocTables(Module &M) {
     auto *dl = new DataLayout(&M);
     Type *sizeType = Type::getIntNTy(M.getContext(), dl->getPointerSizeInBits());
     size_t maxSubSize = 0;
@@ -247,6 +247,12 @@ void RedirectPtr::makeMallocTable(Module &M) {
     Constant *init = ConstantArray::get(arrayType, subArrayInits);
     new GlobalVariable(
             M, arrayType, /*isConstant=*/true, GlobalValue::PrivateLinkage, init, "__malloc_offset_table"
+    );
+
+    ArrayType* array2Type = ArrayType::get(sizeType, mallocN);
+    Constant *zeroInit = ConstantAggregateZero::get(array2Type);
+    new GlobalVariable(
+            M, array2Type, /*isConstant=*/false, GlobalValue::CommonLinkage, zeroInit, "__malloc_start_table"
     );
 }
 

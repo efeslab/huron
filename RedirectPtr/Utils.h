@@ -23,10 +23,8 @@ using namespace llvm;
 struct MallocInfo {
     size_t id{};
     long sizeDelta{};
-    std::vector<size_t> remaps;
 
-    MallocInfo(size_t id, long sizeDelta, std::vector<size_t> &&remaps):
-        id(id), sizeDelta(sizeDelta), remaps(move(remaps)) {}
+    MallocInfo(size_t id, long sizeDelta): id(id), sizeDelta(sizeDelta) {}
 
     MallocInfo() = default;
 };
@@ -35,7 +33,7 @@ class PCInfo {
 public:
     explicit PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines);
 
-    explicit PCInfo(size_t id, long mallocSizeDelta, std::vector<size_t> &&mallocRemaps);
+    explicit PCInfo(size_t id, long mallocSizeDelta);
 
     PCInfo() = default;
 

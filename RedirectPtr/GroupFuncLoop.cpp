@@ -3,9 +3,11 @@
 //
 
 #include "GroupFuncLoop.h"
+#include "UnrollLoopPass.h"
+#include "llvm/IR/Instructions.h"
 
 GroupFuncLoop::GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT &insts) :
-        instsPtr(&insts), func(F) {
+        module(M), instsPtr(&insts), func(F) {
     context = &M->getContext();
     layout = new DataLayout(M);
     unsigned int ptrSize = layout->getPointerSizeInBits();
@@ -77,10 +79,19 @@ void GroupFuncLoop::adjustMalloc(Instruction *inst, const MallocInfo &malloc) co
         assert(false && "Not implemented");
     else if (name == "realloc")
         origSize = call->getArgOperand(1);
-    IRBuilder<> IRB(inst);
     Constant *addValue = ConstantInt::get(sizeType, static_cast<uint64_t>(malloc.sizeDelta), /*isSigned=*/true);
-    Value *newSize = IRB.CreateAdd(origSize, addValue);
+    Value *newSize = BinaryOperator::CreateAdd(origSize, addValue, "", inst);
     call->setArgOperand(0, newSize);
+
+    Instruction *next = inst->getNextNode();
+    GlobalVariable *mallocStartT = module->getGlobalVariable("__malloc_start_table");
+    SmallVector<Value *, 2> indices({
+        ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, malloc.id)
+    });
+    IRBuilder<> irb(next);
+    Value *allocAddr = irb.CreatePtrToInt(call, sizeType);
+    Value *globalArrEntry = irb.CreateGEP(mallocStartT, indices);
+    irb.CreateStore(allocAddr, globalArrEntry);
 }
 
 void GroupFuncLoop::getAllLoops() {
