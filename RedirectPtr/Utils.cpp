@@ -21,7 +21,11 @@ unsigned int getPointerOperandIndex(Instruction *inst, bool &isWrite) {
         isWrite = true;
         return AtomicCmpXchgInst::getPointerOperandIndex();
     }
-    errs() << "Instruction is not load/store!";
+    if (isa<GetElementPtrInst>(inst)) {
+        isWrite = false;
+        return GetElementPtrInst::getPointerOperandIndex();
+    }
+    errs() << "Instruction is not pointer operation!";
     assert(false);
 }
 

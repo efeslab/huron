@@ -50,6 +50,7 @@ namespace {
 
         size_t mallocN{};
         std::vector<std::vector<size_t>> mallocOffsets{};
+        std::unordered_map<std::pair<size_t, size_t>, size_t> mallocIDs{};
         // Table read and parsed from input profile file.
         std::unordered_map<std::pair<size_t, size_t>, PCInfo> profile{};
         // Profile with all instructions found and related to Function*.
@@ -92,7 +93,16 @@ void RedirectPtr::loadDepFile() {
         errs() << "Open file failed! Skipping.\n";
         return;
     }
-    // profile[]
+    size_t n;
+    fin >> n;
+    for (size_t i = 0; i < n; i++) {
+        size_t f1, i1, f2, i2;
+        fin >> f1 >> i1 >> f2 >> i2;
+        auto it = mallocIDs.find(std::make_pair(f1, i1));
+        assert(it != mallocIDs.end());
+        PCInfo value(it->second);
+        profile.emplace(std::make_pair(f2, i2), std::move(value));
+    }
 }
 
 void RedirectPtr::loadMallocInfo(std::istream &is) {
@@ -109,6 +119,7 @@ void RedirectPtr::loadMallocInfo(std::istream &is) {
         auto key = std::make_pair(func, inst);
         if (to == from) continue;  // no change needed for this malloc
         mallocOffsets.emplace_back(std::move(remaps));
+        mallocIDs.emplace(std::make_pair(func, inst), i);
         PCInfo value(i, (long)to - (long)from);
         profile.emplace(key, std::move(value));
     }
@@ -136,6 +147,8 @@ StringRef RedirectPtr::getPassName() const { return "RedirectPtr"; }
 // virtual: define some initialization for the whole module
 bool RedirectPtr::doInitialization(Module &M) {
     loadProfile();
+    if (!depfile.empty())
+        loadDepFile();
     return true;
 }
 

@@ -99,7 +99,27 @@ void GroupFuncLoop::adjustMalloc(Instruction *inst, const MallocInfo &malloc) co
 }
 
 void GroupFuncLoop::resolveExtDep(Instruction *inst, size_t depMallocId) const {
+    unsigned idx = getPointerOperandIndex(inst);
+    Value *pointerOpr = inst->getOperand(idx);
+    GlobalVariable *mallocStartT = module->getGlobalVariable("__malloc_start_table");
+    GlobalVariable *mallocOffsetT = module->getGlobalVariable("__malloc_offset_table");
+    SmallVector<Value *, 2> msIndices({
+        ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId)
+    });
 
+    IRBuilder<> irb(inst);
+    Value *globalArrEntry = irb.CreateGEP(mallocStartT, msIndices);
+    Value *allocStartAddr = irb.CreateLoad(globalArrEntry);
+    Value *pointerAddr = irb.CreatePtrToInt(pointerOpr, sizeType);
+    Value *offset = irb.CreateSub(pointerAddr, allocStartAddr);
+    SmallVector<Value *, 2> moIndices({
+        ConstantInt::get(sizeType, 0), offset
+    });
+    Value *mappedOffsetEntry = irb.CreateGEP(mallocOffsetT, moIndices);
+    Value *mappedOffset = irb.CreateLoad(mappedOffsetEntry);
+    Value *mappedPointerAddr = irb.CreateAdd(allocStartAddr, mappedOffset);
+    Value *mappedPointer = irb.CreateIntToPtr(mappedPointerAddr, pointerOpr->getType());
+    inst->setOperand(idx, mappedPointer);
 }
 
 void GroupFuncLoop::getAllLoops() {
