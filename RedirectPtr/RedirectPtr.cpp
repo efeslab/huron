@@ -40,9 +40,11 @@ namespace {
 
         void cloneFunc(Function *func, Instruction *pthread, const std::set<size_t> &threads);
 
-        LLVMContext *context{};
-        DataLayout *layout{};
+        void makeMallocTable(Module &M);
+
+        size_t mallocN{};
         CallGraphT cg{};
+        std::vector<std::vector<size_t>> mallocOffsets{};
         // Table read and parsed from input profile file.
         std::unordered_map<std::pair<size_t, size_t>, PCInfo> profile{};
         // Profile with all instructions found and related to Function*.
@@ -75,9 +77,8 @@ void RedirectPtr::loadProfile() {
 }
 
 void RedirectPtr::loadMallocInfo(std::istream &is) {
-    size_t n;
-    is >> n;
-    for (size_t i = 0; i < n; i++) {
+    is >> mallocN;
+    for (size_t i = 0; i < mallocN; i++) {
         size_t func, inst, from, to;
         is >> func >> inst >> from >> to;
         std::vector<size_t> remaps;
@@ -88,7 +89,8 @@ void RedirectPtr::loadMallocInfo(std::istream &is) {
         }
         auto key = std::make_pair(func, inst);
         if (to == from) continue;  // no change needed for this malloc
-        PCInfo value((long)to - (long)from, std::move(remaps));
+        mallocOffsets.push_back(remaps);
+        PCInfo value(i, (long)to - (long)from, std::move(remaps));
         profile.emplace(key, std::move(value));
     }
 }
@@ -114,8 +116,6 @@ StringRef RedirectPtr::getPassName() const { return "RedirectPtr"; }
 
 // virtual: define some initialization for the whole module
 bool RedirectPtr::doInitialization(Module &M) {
-    layout = new DataLayout(&M);
-    context = &(M.getContext());
     loadProfile();
     return true;
 }
@@ -210,6 +210,8 @@ inline Function *getThreadFuncFrom(CallInvoke *ci) {
 }
 
 bool RedirectPtr::runOnModule(Module &M) {
+    makeMallocTable(M);
+
     // Search for all pthread_create calls and create call graphs 
     // for threaded functions.
     std::unordered_map<Function *, Instruction *> startersPthreads;
@@ -295,9 +297,34 @@ bool RedirectPtr::runOnModule(Module &M) {
     dbgs() << "\n";
 
     for (auto &p: absPosProfile) {
-        GroupFuncLoop funcPass(this, this->context, this->layout, p.second);
-        funcPass.runOnFunction(*p.first);
+        GroupFuncLoop funcPass(this, &M, p.first, p.second);
+        funcPass.runOnFunction();
     }
 
     return true;
+}
+
+void RedirectPtr::makeMallocTable(Module &M) {
+    auto *dl = new DataLayout(&M);
+    Type *sizeType = Type::getIntNTy(M.getContext(), dl->getPointerSizeInBits());
+    size_t maxSubSize = 0;
+    for (const auto &sub: mallocOffsets)
+        maxSubSize = std::max(maxSubSize, sub.size());
+    ArrayType *subArrayType = ArrayType::get(sizeType, maxSubSize);
+    ArrayType* arrayType = ArrayType::get(subArrayType, mallocN);
+
+    std::vector<Constant *> subArrayInits;
+    for (const auto &sub: mallocOffsets) {
+        std::vector<Constant *> remapConsts;
+        for (size_t m: sub) {
+            Constant *c = ConstantInt::get(sizeType, m, /*isSigned=*/false);
+            remapConsts.push_back(c);
+        }
+        Constant *init = ConstantArray::get(subArrayType, remapConsts);
+        subArrayInits.push_back(init);
+    }
+    Constant *init = ConstantArray::get(arrayType, subArrayInits);
+    new GlobalVariable(
+            M, arrayType, /*isConstant=*/true, GlobalValue::PrivateLinkage, init, "__malloc_offset_table"
+    );
 }

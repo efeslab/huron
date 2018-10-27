@@ -21,11 +21,12 @@ using namespace llvm;
 #endif
 
 struct MallocInfo {
+    size_t id{};
     long sizeDelta{};
     std::vector<size_t> remaps;
 
-    MallocInfo(long sizeDelta, std::vector<size_t> &&remaps):
-        sizeDelta(sizeDelta), remaps(move(remaps)) {}
+    MallocInfo(size_t id, long sizeDelta, std::vector<size_t> &&remaps):
+        id(id), sizeDelta(sizeDelta), remaps(move(remaps)) {}
 
     MallocInfo() = default;
 };
@@ -43,8 +44,8 @@ public:
             std::sort(p.second.begin(), p.second.end());
     }
 
-    explicit PCInfo(long mallocSizeDelta, std::vector<size_t> &&mallocRemaps) :
-            malloc(mallocSizeDelta, move(mallocRemaps)), isRedirect(false) {}
+    explicit PCInfo(size_t id, long mallocSizeDelta, std::vector<size_t> &&mallocRemaps) :
+            malloc(id, mallocSizeDelta, move(mallocRemaps)), isRedirect(false) {}
 
     PCInfo() = default;
 

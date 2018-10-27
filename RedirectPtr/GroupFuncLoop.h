@@ -9,22 +9,24 @@
 
 class GroupFuncLoop {
 public:
-    explicit GroupFuncLoop(ModulePass *pass, LLVMContext *context, DataLayout *layout, PostCloneT &insts);
+    explicit GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT &insts);
 
-    void runOnFunction(Function &func);
+    void runOnFunction();
 
 private:
+    void getAllLoops();
+
     void replaceCallFunc(Instruction *inst, Function *newFunc) const;
 
     void offsetSimplInst(Instruction *inst, long offset) const;
 
-    void adjustMalloc(Instruction *inst, long sizeAdd) const;
+    void adjustMalloc(Instruction *inst, const MallocInfo &malloc) const;
 
-    void getAllLoops(Function &func, LoopInfo *li);
-
-    ModulePass *pass;
+    LLVMContext *context{};
+    DataLayout *layout{};
+    Function *func{};
+    LoopInfo *loopInfo{};
     Type *intPtrType, *sizeType;
-    DataLayout *layout;
     PostCloneT *instsPtr;
     std::unordered_map<Loop *, PostCloneT> unrollInsts;
     PostUnrollT finalTable;

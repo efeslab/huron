@@ -4,19 +4,21 @@
 
 #include "GroupFuncLoop.h"
 
-GroupFuncLoop::GroupFuncLoop(ModulePass *pass, LLVMContext *context, DataLayout *layout, PostCloneT &insts) :
-        pass(pass), layout(layout), instsPtr(&insts) {
+GroupFuncLoop::GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT &insts) :
+        instsPtr(&insts), func(F) {
+    context = &M->getContext();
+    layout = new DataLayout(M);
     unsigned int ptrSize = layout->getPointerSizeInBits();
     sizeType = intPtrType = Type::getIntNTy(*context, ptrSize);
+    loopInfo = &(MP->getAnalysis<LoopInfoWrapperPass>(*F).getLoopInfo());
 }
 
-void GroupFuncLoop::runOnFunction(Function &func) {
-    dbgs() << "Working on function " << func.getName() << '\n';
+void GroupFuncLoop::runOnFunction() {
+    dbgs() << "Working on function " << func->getName() << '\n';
     dbgs() << "  Gathering the loops.\n";
-    LoopInfo *li = &(pass->getAnalysis<LoopInfoWrapperPass>(func).getLoopInfo());
-    getAllLoops(func, li);
+    getAllLoops();
     for (const auto &p: unrollInsts) {
-        UnrollLoopPass pass(layout, &func, li);
+        UnrollLoopPass pass(layout, func, loopInfo);
         PostUnrollT unrolled = pass.runOnInstGroup(p.second);
         finalTable.insert(unrolled.begin(), unrolled.end());
     }
@@ -34,7 +36,7 @@ void GroupFuncLoop::runOnFunction(Function &func) {
             c++;
         };
         auto changeMalloc = [this, p2, &m](const MallocInfo &malloc) {
-            adjustMalloc(p2.first, malloc.sizeDelta);
+            adjustMalloc(p2.first, malloc);
             m++;
         };
         p2.second.actOn(changeOffset, changeCallee, changeMalloc);
@@ -64,7 +66,7 @@ void GroupFuncLoop::offsetSimplInst(Instruction *inst, long offset) const {
     inst->setOperand(index, redirectPtr);
 }
 
-void GroupFuncLoop::adjustMalloc(Instruction *inst, long sizeAdd) const {
+void GroupFuncLoop::adjustMalloc(Instruction *inst, const MallocInfo &malloc) const {
     // allocs are no-throw and won't be invoked.
     auto *call = cast<CallInst>(inst);
     StringRef name = call->getCalledFunction()->getName();
@@ -76,16 +78,16 @@ void GroupFuncLoop::adjustMalloc(Instruction *inst, long sizeAdd) const {
     else if (name == "realloc")
         origSize = call->getArgOperand(1);
     IRBuilder<> IRB(inst);
-    Constant *addValue = ConstantInt::get(sizeType, static_cast<uint64_t>(sizeAdd), /*isSigned=*/true);
+    Constant *addValue = ConstantInt::get(sizeType, static_cast<uint64_t>(malloc.sizeDelta), /*isSigned=*/true);
     Value *newSize = IRB.CreateAdd(origSize, addValue);
     call->setArgOperand(0, newSize);
 }
 
-void GroupFuncLoop::getAllLoops(Function &func, LoopInfo *li) {
+void GroupFuncLoop::getAllLoops() {
     for (const auto &p : *instsPtr) {
         if (p.second.getSize() != 1) {
             BasicBlock *bb = p.first->getParent();
-            Loop *loop = li->getLoopFor(bb);
+            Loop *loop = loopInfo->getLoopFor(bb);
             assert(loop && "A multiple-offset inst is not directly in a loop");
             while (Loop *parent = loop->getParentLoop())
                 loop = parent;
