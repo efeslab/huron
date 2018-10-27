@@ -7,12 +7,12 @@
 
 #include <iostream>
 #include <set>
-#include <experimental/string_view>
+#include <string_view>
 #include <cassert>
 #include <cstring>
 #include <vector>
 
-using std::experimental::string_view;
+using std::string_view;
 
 const int CACHELINE_BIT = 6;
 

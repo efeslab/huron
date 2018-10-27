@@ -9,6 +9,7 @@
 #include <set>
 #include <map>
 #include <stack>
+#include <numeric>
 #include "Detect.h"
 
 using namespace std;
