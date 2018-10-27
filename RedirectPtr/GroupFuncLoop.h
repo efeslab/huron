@@ -24,6 +24,8 @@ private:
 
     void adjustMalloc(Instruction *inst, const MallocInfo &malloc) const;
 
+    void resolveExtDep(Instruction *inst, size_t depMallocId) const;
+
     Module *module{};
     LLVMContext *context{};
     DataLayout *layout{};

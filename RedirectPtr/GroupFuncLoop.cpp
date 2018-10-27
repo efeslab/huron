@@ -25,7 +25,7 @@ void GroupFuncLoop::runOnFunction() {
         finalTable.insert(unrolled.begin(), unrolled.end());
     }
     dbgs() << "  Processing instructions.\n";
-    size_t c = 0, m = 0, o = 0;
+    size_t c = 0, m = 0, d = 0, o = 0;
 
     for (const auto &p2: finalTable) {
         auto changeOffset = [this, p2, &o](std::pair<size_t, size_t> fromTo) {
@@ -33,17 +33,21 @@ void GroupFuncLoop::runOnFunction() {
             offsetSimplInst(p2.first, offset);
             o++;
         };
-        auto changeCallee = [this, p2, &c](Function *callee) {
-            replaceCallFunc(p2.first, callee);
-            c++;
+        auto externalDep = [this, p2, &d](size_t depId) {
+            resolveExtDep(p2.first, depId);
+            d++;
         };
         auto changeMalloc = [this, p2, &m](const MallocInfo &malloc) {
             adjustMalloc(p2.first, malloc);
             m++;
         };
-        p2.second.actOn(changeOffset, changeCallee, changeMalloc);
+        auto changeCallee = [this, p2, &c](Function *callee) {
+            replaceCallFunc(p2.first, callee);
+            c++;
+        };
+        p2.second.actOn(changeOffset, externalDep, changeMalloc, changeCallee);
     }
-    dbgs() << "  (c, m, o) = (" << c << ", " << m << ", " << o << ")\n";
+    dbgs() << "  (c, m, o, d) = (" << c << ", " << m << ", " << o << ", " << d << ")\n";
 }
 
 void GroupFuncLoop::replaceCallFunc(Instruction *inst, Function *newFunc) const {
@@ -94,6 +98,10 @@ void GroupFuncLoop::adjustMalloc(Instruction *inst, const MallocInfo &malloc) co
     irb.CreateStore(allocAddr, globalArrEntry);
 }
 
+void GroupFuncLoop::resolveExtDep(Instruction *inst, size_t depMallocId) const {
+
+}
+
 void GroupFuncLoop::getAllLoops() {
     for (const auto &p : *instsPtr) {
         if (p.second.getSize() != 1) {
@@ -104,6 +112,6 @@ void GroupFuncLoop::getAllLoops() {
                 loop = parent;
             unrollInsts[loop].emplace(p.first, p.second);
         } else
-            finalTable.emplace(p.first, ExpandedPCInfo(p.second, 0));
+            finalTable.emplace(p.first, p.second[0]);
     }
 }

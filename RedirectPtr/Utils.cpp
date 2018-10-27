@@ -31,7 +31,7 @@ unsigned int getPointerOperandIndex(Instruction *inst) {
 }
 
 PCInfo::PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines)
-        : isRedirect(true) {
+        : which(0) {
     for (const auto &tup : lines) {
         size_t tid, from, to;
         std::tie(tid, from, to) = tup;
@@ -41,10 +41,12 @@ PCInfo::PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines)
         std::sort(p.second.begin(), p.second.end());
 }
 
-PCInfo::PCInfo(size_t id, long mallocSizeDelta): malloc(id, mallocSizeDelta), isRedirect(false) {}
+PCInfo::PCInfo(size_t id, long mallocSizeDelta): malloc(id, mallocSizeDelta), which(1) {}
+
+PCInfo::PCInfo(size_t depId): depAllocId(depId), which(2) {}
 
 std::set<size_t> PCInfo::getThreads() const {
-    if (isRedirect) {
+    if (which == 0) {
         std::set<size_t> threads;
         for (const auto &p: allRedirects)
             threads.insert(p.first);
@@ -53,72 +55,72 @@ std::set<size_t> PCInfo::getThreads() const {
 }
 
 bool PCInfo::isCorrectInst(Instruction *inst) const {
-    if (isRedirect) {
+    if (which == 0) {
         return isa<LoadInst>(inst) || isa<StoreInst>(inst) ||
                isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
-    } else {
+    } else if (which == 1) {
         // allocs are no-throw and won't be invoked.
         auto *ci = dyn_cast<CallInst>(inst);
         if (!ci)
             return false;
         StringRef name = ci->getCalledFunction()->getName();
         return name == "malloc" || name == "calloc" || name == "realloc";
-    }
+    } else return true;
 }
 
-bool PCInfo::getThreaded(size_t tid, MallocInfo &mloc, std::vector<std::pair<size_t, size_t>> &re) const {
-    if (isRedirect) {
+ThreadedPCInfo PCInfo::operator[](size_t tid) const {
+    ThreadedPCInfo tpcInfo;
+    if (which == 0) {
         auto it = allRedirects.find(tid);
         if (it != allRedirects.end())
-            re = it->second;
-        else
-            re.clear();
-    } else
-        mloc = malloc;
-    return isRedirect;
-}
-
-ThreadedPCInfo::ThreadedPCInfo(const PCInfo &pc, size_t tid) {
-    bool isRedirect = pc.getThreaded(tid, malloc, redirects);
-    triSwitch = (uint8_t) (isRedirect ? 0 : 2);
+            tpcInfo.redirects = it->second;
+    } else if (which == 1) {
+        tpcInfo.malloc = malloc;
+    } else if (which == 2) {
+        tpcInfo.depAllocId = depAllocId;
+    }
+    tpcInfo.which = which;
+    return tpcInfo;
 }
 
 ThreadedPCInfo::ThreadedPCInfo(std::vector<Function *> dupFuncs) :
-        dupFuncs(std::move(dupFuncs)), triSwitch(1) {}
+        dupFuncs(std::move(dupFuncs)), which(3) {}
 
 size_t ThreadedPCInfo::getSize() const {
-    switch (triSwitch) {
+    switch (which) {
         case 0:
             return redirects.size();
         case 1:
-            return dupFuncs.size();
+            return 1;
         case 2:
             return 1;
+        case 3:
+            return dupFuncs.size();
         default:
             assert(false);
     }
 }
 
-uint8_t ThreadedPCInfo::getLoopWise(size_t loopid, std::pair<size_t, size_t> &redirect, Function *&callee,
-                                    MallocInfo &mloc) const {
-    switch (triSwitch) {
+ExpandedPCInfo ThreadedPCInfo::operator[](size_t loopid) const {
+    ExpandedPCInfo epcInfo;
+    switch (which) {
         case 0:
             assert(redirects.size() > loopid);
-            redirect = redirects[loopid];
+            epcInfo.redirect = redirects[loopid];
             break;
         case 1:
-            assert(dupFuncs.size() > loopid);
-            callee = dupFuncs[loopid];
+            epcInfo.depAllocId = depAllocId;
             break;
         case 2:
-            mloc = malloc;
+            epcInfo.malloc = malloc;
+            break;
+        case 3:
+            assert(dupFuncs.size() > loopid);
+            epcInfo.callee = dupFuncs[loopid];
             break;
         default:
             assert(false);
     }
-    return triSwitch;
-}
-
-ExpandedPCInfo::ExpandedPCInfo(const ThreadedPCInfo &info, size_t loopid) {
-    triSwitch = info.getLoopWise(loopid, redirect, callee, malloc);
+    epcInfo.which = which;
+    return epcInfo;
 }

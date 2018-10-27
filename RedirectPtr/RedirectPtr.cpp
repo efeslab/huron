@@ -32,6 +32,8 @@ namespace {
     private:
         void loadProfile();
 
+        void loadDepFile();
+
         void loadMallocInfo(std::istream &is);
 
         void loadLocInfo(std::istream &is);
@@ -67,6 +69,10 @@ static RegisterPass<RedirectPtr> redirectptr(
         "redirectptr", "Redirect load/stores according to a profile", false, false);
 static cl::opt<std::string> locfile("locfile", cl::desc("Specify profile path"),
                                     cl::value_desc("filename"), cl::Required);
+static cl::opt<std::string> depfile(
+        "depfile", cl::desc("Specify an optional file signifying ptr->alloc dependency"),
+        cl::value_desc("filename"), cl::Optional
+);
 
 void RedirectPtr::loadProfile() {
     dbgs() << "Loading from file: " << locfile << "\n\n";
@@ -77,6 +83,16 @@ void RedirectPtr::loadProfile() {
     }
     loadMallocInfo(fin);
     loadLocInfo(fin);
+}
+
+void RedirectPtr::loadDepFile() {
+    dbgs() << "Loading from optional file: " << depfile << "\n\n";
+    std::ifstream fin(depfile.c_str());
+    if (fin.fail()) {
+        errs() << "Open file failed! Skipping.\n";
+        return;
+    }
+    // profile[]
 }
 
 void RedirectPtr::loadMallocInfo(std::istream &is) {
@@ -134,7 +150,7 @@ PostCloneT getEquivalentInsts(size_t tid, const ValueToValueMapTy &map, const Pr
         assert(it != map.end());
         Instruction *newInst = cast<Instruction>(it->second);
         assert(newInst);
-        ret.emplace(newInst, ThreadedPCInfo(p.second, tid));
+        ret.emplace(newInst, p.second[tid]);
     }
     return ret;
 }
@@ -344,7 +360,7 @@ void RedirectPtr::buildAbsPosProfile(Module &M) {
             continue;
         // By default, thread 0.
         for (const auto &p: it->second)
-            this->absPosProfile[&fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
+            this->absPosProfile[&fb].emplace(p.first, p.second[0]);
     }
     dbgs() << "\n";
 }

@@ -29,65 +29,27 @@ struct MallocInfo {
     MallocInfo() = default;
 };
 
-class PCInfo {
-public:
-    explicit PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines);
-
-    explicit PCInfo(size_t id, long mallocSizeDelta);
-
-    PCInfo() = default;
-
-    std::set<size_t> getThreads() const;
-
-    bool isCorrectInst(Instruction *inst) const;
-
-    bool getThreaded(size_t tid, MallocInfo &mloc,
-                     std::vector<std::pair<size_t, size_t>> &re) const;
-
-private:
-    std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>> allRedirects;
-    MallocInfo malloc;
-    bool isRedirect;
-};
-
-class ThreadedPCInfo {
-public:
-    explicit ThreadedPCInfo(const PCInfo &pc, size_t tid);
-
-    explicit ThreadedPCInfo(std::vector<Function *> dupFuncs);
-
-    ThreadedPCInfo() = default;
-
-    size_t getSize() const;
-
-    uint8_t getLoopWise(size_t loopid,
-                        std::pair<size_t, size_t> &redirect,
-                        Function *&callee, MallocInfo &mloc) const;
-
-private:
-    std::vector<std::pair<size_t, size_t>> redirects{};
-    std::vector<Function *> dupFuncs{};
-    MallocInfo malloc{};
-    uint8_t triSwitch{};
-};
+class PCInfo;
+class ThreadedPCInfo;
 
 class ExpandedPCInfo {
 public:
     ExpandedPCInfo() = default;
 
-    explicit ExpandedPCInfo(const ThreadedPCInfo &info, size_t loopid);
-
-    template<typename Func1, typename Func2, typename Func3>
-    void actOn(Func1 f1, Func2 f2, Func3 f3) const {
-        switch (triSwitch) {
+    template<typename Func1, typename Func2, typename Func3, typename Func4>
+    void actOn(Func1 f1, Func2 f2, Func3 f3, Func4 f4) const {
+        switch (which) {
             case 0:
                 f1(redirect);
                 return;
             case 1:
-                f2(callee);
+                f2(depAllocId);
                 return;
             case 2:
                 f3(malloc);
+                return;
+            case 3:
+                f4(callee);
                 return;
             default:
                 assert(false);
@@ -95,10 +57,56 @@ public:
     }
 
 private:
+    friend ThreadedPCInfo;
+
     std::pair<size_t, size_t> redirect;
     Function *callee{};
     MallocInfo malloc{};
-    uint8_t triSwitch{};
+    size_t depAllocId{};
+    uint8_t which{};
+};
+
+class ThreadedPCInfo {
+public:
+    explicit ThreadedPCInfo(std::vector<Function *> dupFuncs);
+
+    ThreadedPCInfo() = default;
+
+    size_t getSize() const;
+
+    ExpandedPCInfo operator[](size_t loopid) const;
+
+private:
+    friend PCInfo;
+
+    std::vector<std::pair<size_t, size_t>> redirects{};
+    MallocInfo malloc{};
+    size_t depAllocId{};
+    std::vector<Function *> dupFuncs{};
+    uint8_t which{};
+};
+
+class PCInfo {
+public:
+    explicit PCInfo(const std::vector<std::tuple<size_t, size_t, size_t>> &lines);
+
+    explicit PCInfo(size_t id, long mallocSizeDelta);
+
+    explicit PCInfo(size_t depId);
+
+    PCInfo() = default;
+
+    std::set<size_t> getThreads() const;
+
+    bool isCorrectInst(Instruction *inst) const;
+
+    ThreadedPCInfo operator[](size_t tid) const;
+
+private:
+    std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>> allRedirects;
+    MallocInfo malloc{};
+    size_t depAllocId{};
+    uint8_t which{};
 };
 
 typedef std::unordered_map<Instruction *, PCInfo> PreCloneT;
