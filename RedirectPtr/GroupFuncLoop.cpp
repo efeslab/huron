@@ -33,19 +33,19 @@ void GroupFuncLoop::runOnFunction() {
             offsetSimplInst(p2.first, offset);
             o++;
         };
-        auto externalDep = [this, p2, &d](size_t depId) {
-            resolveExtDep(p2.first, depId);
-            d++;
-        };
         auto changeMalloc = [this, p2, &m](const MallocInfo &malloc) {
             adjustMalloc(p2.first, malloc);
             m++;
+        };
+        auto externalDep = [this, p2, &d](size_t depId) {
+            resolveExtDep(p2.first, depId);
+            d++;
         };
         auto changeCallee = [this, p2, &c](Function *callee) {
             replaceCallFunc(p2.first, callee);
             c++;
         };
-        p2.second.actOn(changeOffset, externalDep, changeMalloc, changeCallee);
+        p2.second.actOn(changeOffset, changeMalloc, externalDep, changeCallee);
     }
     dbgs() << "  (c, m, o, d) = (" << c << ", " << m << ", " << o << ", " << d << ")\n";
 }

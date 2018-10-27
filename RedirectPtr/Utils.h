@@ -43,10 +43,10 @@ public:
                 f1(redirect);
                 return;
             case 1:
-                f2(depAllocId);
+                f2(malloc);
                 return;
             case 2:
-                f3(malloc);
+                f3(depAllocId);
                 return;
             case 3:
                 f4(callee);
@@ -60,9 +60,9 @@ private:
     friend ThreadedPCInfo;
 
     std::pair<size_t, size_t> redirect;
-    Function *callee{};
     MallocInfo malloc{};
     size_t depAllocId{};
+    Function *callee{};
     uint8_t which{};
 };
 

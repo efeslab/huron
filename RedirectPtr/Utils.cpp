@@ -109,10 +109,10 @@ ExpandedPCInfo ThreadedPCInfo::operator[](size_t loopid) const {
             epcInfo.redirect = redirects[loopid];
             break;
         case 1:
-            epcInfo.depAllocId = depAllocId;
+            epcInfo.malloc = malloc;
             break;
         case 2:
-            epcInfo.malloc = malloc;
+            epcInfo.depAllocId = depAllocId;
             break;
         case 3:
             assert(dupFuncs.size() > loopid);
