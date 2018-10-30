@@ -26,6 +26,14 @@ private:
     std::unordered_map<PC, size_t> malloc_single_size;
 };
 
+struct FixedMalloc {
+    PC pc;
+    size_t origSize, newSize;
+    std::vector<size_t> translations;
+
+    FixedMalloc(PC pc, size_t origSize, size_t newSize, const std::map<size_t, Segment> &remap);
+};
+
 class RepairPass {
 public:
     static const char *optionals;
@@ -46,7 +54,7 @@ private:
 
     void print_layout(std::ofstream &layout_stream);
 
-    std::vector<std::tuple<PC, size_t, size_t>> all_fixed_mallocs;
+    std::vector<FixedMalloc> all_fixed_mallocs;
     std::multimap<PC, std::tuple<size_t, size_t, size_t>> all_pcs_layout;
     int target_thread_count;
     DetectPass::ApiT input;

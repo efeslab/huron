@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "Utils.h"
+#include "llvm/IR/InstIterator.h"
 
 template <typename T>
 raw_ostream &operator << (raw_ostream &os, const std::set<T> &set) {

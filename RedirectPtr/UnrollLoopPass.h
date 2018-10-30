@@ -87,9 +87,9 @@ private:
         for (const auto &instP : hook) {
             auto it = insts.find(instP.first);
             assert(it != insts.end());
-            instOps[instP.first] = ExpandedPCInfo(it->second, 0);
+            instOps[instP.first] = it->second[0];
             for (size_t i = 0; i < instP.second.size(); i++)
-                instOps[instP.second[i]] = ExpandedPCInfo(it->second, i + 1);
+                instOps[instP.second[i]] = it->second[i + 1];
         }
         return instOps;
     }

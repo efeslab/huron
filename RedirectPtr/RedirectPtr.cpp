@@ -32,20 +32,25 @@ namespace {
     private:
         void loadProfile();
 
+        void loadDepFile();
+
         void loadMallocInfo(std::istream &is);
 
         void loadLocInfo(std::istream &is);
-
-        void resolveThreadedFunc(Function *func, const PreCloneT &instInfos, 
-            const std::set<size_t> &funcUserThreads);
 
         void replaceThreadedFuncCall(size_t tid, Function *func);
 
         void cloneFunc(Function *func, Instruction *pthread, const std::set<size_t> &threads);
 
-        LLVMContext *context{};
-        DataLayout *layout{};
-        CallGraphT cg{};
+        void makeMallocTables(Module &M);
+
+        void locateInstructions(Module &M, CallGraphT *cg);
+
+        void buildAbsPosProfile(Module &M);
+
+        size_t mallocN{};
+        std::vector<std::vector<size_t>> mallocOffsets{};
+        std::unordered_map<std::pair<size_t, size_t>, size_t> mallocIDs{};
         // Table read and parsed from input profile file.
         std::unordered_map<std::pair<size_t, size_t>, PCInfo> profile{};
         // Profile with all instructions found and related to Function*.
@@ -65,6 +70,10 @@ static RegisterPass<RedirectPtr> redirectptr(
         "redirectptr", "Redirect load/stores according to a profile", false, false);
 static cl::opt<std::string> locfile("locfile", cl::desc("Specify profile path"),
                                     cl::value_desc("filename"), cl::Required);
+static cl::opt<std::string> depfile(
+        "depfile", cl::desc("Specify an optional file signifying ptr->alloc dependency"),
+        cl::value_desc("filename"), cl::Optional
+);
 
 void RedirectPtr::loadProfile() {
     dbgs() << "Loading from file: " << locfile << "\n\n";
@@ -77,15 +86,43 @@ void RedirectPtr::loadProfile() {
     loadLocInfo(fin);
 }
 
-void RedirectPtr::loadMallocInfo(std::istream &is) {
+void RedirectPtr::loadDepFile() {
+    if (depfile.empty())
+        return;
+    dbgs() << "Loading from optional file: " << depfile << "\n\n";
+    std::ifstream fin(depfile.c_str());
+    if (fin.fail()) {
+        errs() << "Open file failed! Skipping.\n";
+        return;
+    }
     size_t n;
-    is >> n;
+    fin >> n;
     for (size_t i = 0; i < n; i++) {
+        size_t f1, i1, f2, i2;
+        fin >> f1 >> i1 >> f2 >> i2;
+        auto it = mallocIDs.find(std::make_pair(f1, i1));
+        assert(it != mallocIDs.end());
+        PCInfo value(it->second);
+        profile.emplace(std::make_pair(f2, i2), std::move(value));
+    }
+}
+
+void RedirectPtr::loadMallocInfo(std::istream &is) {
+    is >> mallocN;
+    for (size_t i = 0; i < mallocN; i++) {
         size_t func, inst, from, to;
         is >> func >> inst >> from >> to;
+        std::vector<size_t> remaps;
+        for (size_t j = 0; j < from; j++) {
+            size_t next;
+            is >> next;
+            remaps.push_back(next);
+        }
         auto key = std::make_pair(func, inst);
         if (to == from) continue;  // no change needed for this malloc
-        PCInfo value((long)to - (long)from);
+        mallocOffsets.emplace_back(std::move(remaps));
+        mallocIDs.emplace(std::make_pair(func, inst), i);
+        PCInfo value(i, (long)to - (long)from);
         profile.emplace(key, std::move(value));
     }
 }
@@ -111,9 +148,9 @@ StringRef RedirectPtr::getPassName() const { return "RedirectPtr"; }
 
 // virtual: define some initialization for the whole module
 bool RedirectPtr::doInitialization(Module &M) {
-    layout = new DataLayout(&M);
-    context = &(M.getContext());
     loadProfile();
+    if (!depfile.empty())
+        loadDepFile();
     return true;
 }
 
@@ -128,7 +165,7 @@ PostCloneT getEquivalentInsts(size_t tid, const ValueToValueMapTy &map, const Pr
         assert(it != map.end());
         Instruction *newInst = cast<Instruction>(it->second);
         assert(newInst);
-        ret.emplace(newInst, ThreadedPCInfo(p.second, tid));
+        ret.emplace(newInst, p.second[tid]);
     }
     return ret;
 }
@@ -178,13 +215,13 @@ void RedirectPtr::replaceThreadedFuncCall(size_t tid, Function *func) {
         return it2->second;
     };
     for (auto ins = inst_begin(func), ie = inst_end(func); ins != ie; ++ins) {
-        if (CallInst *call = dyn_cast<CallInst>(&*ins)) {
+        if (auto *call = dyn_cast<CallInst>(&*ins)) {
             Function *replaceCallee = findReplace(call->getCalledFunction());
             if (!replaceCallee)
                 continue;
             call->setCalledFunction(replaceCallee);
         }
-        else if (InvokeInst *invoke = dyn_cast<InvokeInst>(&*ins)) {
+        else if (auto *invoke = dyn_cast<InvokeInst>(&*ins)) {
             Function *replaceCallee = findReplace(invoke->getCalledFunction());
             if (!replaceCallee)
                 continue;
@@ -207,25 +244,53 @@ inline Function *getThreadFuncFrom(CallInvoke *ci) {
 }
 
 bool RedirectPtr::runOnModule(Module &M) {
-    // Search for all pthread_create calls and create call graphs 
-    // for threaded functions.
-    std::unordered_map<Function *, Instruction *> startersPthreads;
-    dbgs() << "Searching for pthread_create:\n";
-    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb)
-        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); insb != inse; ++insb) {
-            Function *pthread_func = nullptr;
-            if (CallInst *ci = dyn_cast<CallInst>(&*insb))
-                pthread_func = getThreadFuncFrom(ci);
-            else if (InvokeInst *ii = dyn_cast<InvokeInst>(&*insb))
-                pthread_func = getThreadFuncFrom(ii);
-            if (pthread_func) {
-                dbgs() << "Found " << *insb << "\n";
-                this->cg.addStartFunc(pthread_func);
-                startersPthreads.emplace(pthread_func, &*insb);
-            }
-        }
-    dbgs() << "\n";
+    makeMallocTables(M);
 
+    buildAbsPosProfile(M);
+
+    for (auto &p: absPosProfile) {
+        GroupFuncLoop funcPass(this, &M, p.first, p.second);
+        funcPass.runOnFunction();
+    }
+
+    return true;
+}
+
+void RedirectPtr::makeMallocTables(Module &M) {
+    auto *dl = new DataLayout(&M);
+    Type *sizeType = Type::getIntNTy(M.getContext(), dl->getPointerSizeInBits());
+    size_t maxSubSize = 0;
+    for (const auto &sub: mallocOffsets)
+        maxSubSize = std::max(maxSubSize, sub.size());
+    ArrayType *subArrayType = ArrayType::get(sizeType, maxSubSize);
+    ArrayType* arrayType = ArrayType::get(subArrayType, mallocN);
+
+    std::vector<Constant *> subArrayInits;
+    for (const auto &sub: mallocOffsets) {
+        std::vector<Constant *> remapConsts;
+        for (size_t m: sub) {
+            Constant *c = ConstantInt::get(sizeType, m, /*isSigned=*/false);
+            remapConsts.push_back(c);
+        }
+        Constant *init = ConstantArray::get(subArrayType, remapConsts);
+        subArrayInits.push_back(init);
+    }
+    Constant *init = ConstantArray::get(arrayType, subArrayInits);
+    new GlobalVariable(
+            M, arrayType, /*isConstant=*/true, GlobalValue::ExternalLinkage, init, "__malloc_offset_table"
+    );
+
+    ArrayType* array2Type = ArrayType::get(sizeType, mallocN);
+    Constant *zeroInit = ConstantAggregateZero::get(array2Type);
+    new GlobalVariable(
+            M, array2Type, /*isConstant=*/false, GlobalValue::CommonLinkage, zeroInit, "__malloc_start_table"
+    );
+    new GlobalVariable(
+            M, array2Type, /*isConstant=*/false, GlobalValue::CommonLinkage, zeroInit, "__malloc_size_table"
+    );
+}
+
+void RedirectPtr::locateInstructions(Module &M, CallGraphT *cg) {
     // Expand functions thread-wise
     // and use pointer to locate objects (instead of offset)
     size_t funcCounter = 0;
@@ -234,11 +299,11 @@ bool RedirectPtr::runOnModule(Module &M) {
         size_t instCounter = 0;
         PreCloneT instInfos;
         dbgs() << funcCounter << ' ' << fb->getName() << '\n';
-        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb); 
+        for (auto insb = inst_begin(&*fb), inse = inst_end(&*fb);
              insb != inse; ++insb, ++instCounter) {
-                auto thisLoc = std::make_pair(funcCounter, instCounter);
-                auto it = profile.find(thisLoc);
-                if (it == profile.end()) continue;
+            auto thisLoc = std::make_pair(funcCounter, instCounter);
+            auto it = this->profile.find(thisLoc);
+            if (it == this->profile.end()) continue;
             dbgs() << funcCounter << ' ' << instCounter << *insb << '\n';
             assert(it->second.isCorrectInst(&*insb));
             instInfos[&*insb] = it->second;
@@ -252,19 +317,45 @@ bool RedirectPtr::runOnModule(Module &M) {
             std::set<size_t> threads = instInfoP.second.getThreads();
             funcUserThreads.insert(threads.begin(), threads.end());
         }
-        this->cg.hintFuncThreads(&*fb, funcUserThreads);
+        if (cg)
+            cg->hintFuncThreads(&*fb, funcUserThreads);
         this->preCloneProfile.emplace(&*fb, instInfos);
     }
-    this->cg.propagateFuncThreads();
-    dbgs() << this->cg << '\n';
+}
+
+void RedirectPtr::buildAbsPosProfile(Module &M) {
+    // Search for all pthread_create calls and create call graphs
+    // for threaded functions.
+    std::unordered_map<Function *, Instruction *> startersPthreads;
+    CallGraphT cg;
+    dbgs() << "Searching for pthread_create:\n";
+    for (auto &fb : M) {
+        for (auto insb = inst_begin(&fb), inse = inst_end(&fb); insb != inse; ++insb) {
+            Function *pthread_func = nullptr;
+            if (auto *ci = dyn_cast<CallInst>(&*insb))
+                pthread_func = getThreadFuncFrom(ci);
+            else if (auto *ii = dyn_cast<InvokeInst>(&*insb))
+                pthread_func = getThreadFuncFrom(ii);
+            if (pthread_func) {
+                dbgs() << "Found " << *insb << "\n";
+                cg.addStartFunc(pthread_func);
+                startersPthreads.emplace(pthread_func, &*insb);
+            }
+        }
+    }
     dbgs() << "\n";
 
-    // The call graph may contain some functions not in the profile, 
+    locateInstructions(M, &cg);
+    cg.propagateFuncThreads();
+    dbgs() << cg << '\n';
+    dbgs() << "\n";
+
+    // The call graph may contain some functions not in the profile,
     // so we walk through it first.
     dbgs() << "Cloning functions.\n";
-    auto cloneFunctions = this->cg.getFunctions();
+    auto cloneFunctions = cg.getFunctions();
     for (const auto &f: cloneFunctions) {
-        const auto &threads = this->cg.getFuncThreads(f);
+        const auto &threads = cg.getFuncThreads(f);
         assert(threads.size() > 1);
         auto it = startersPthreads.find(f);
         Instruction *pthread = it == startersPthreads.end() ? nullptr : it->second;
@@ -277,24 +368,17 @@ bool RedirectPtr::runOnModule(Module &M) {
         for (const auto &p2: p.second)
             this->replaceThreadedFuncCall(p2.first, p2.second);
     dbgs() << "\n";
-    
+
     dbgs() << "Getting instructions in non-cloned functions.\n";
-    for (auto fb = M.begin(), fe = M.end(); fb != fe; ++fb) {
-        if (cloneFunctions.find(&*fb) != cloneFunctions.end())
+    for (auto &fb : M) {
+        if (clonedFuncs.find(&fb) != clonedFuncs.end())
             continue;
-        auto it = this->preCloneProfile.find(&*fb);
+        auto it = this->preCloneProfile.find(&fb);
         if (it == this->preCloneProfile.end())
             continue;
         // By default, thread 0.
         for (const auto &p: it->second)
-            this->absPosProfile[&*fb].emplace(p.first, ThreadedPCInfo(p.second, 0));
+            this->absPosProfile[&fb].emplace(p.first, p.second[0]);
     }
     dbgs() << "\n";
-
-    for (auto &p: absPosProfile) {
-        GroupFuncLoop funcPass(this, this->context, this->layout, p.second);
-        funcPass.runOnFunction(*p.first);
-    }
-
-    return true;
 }

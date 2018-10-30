@@ -7,12 +7,21 @@
 
 #include <iostream>
 #include <set>
-#include <string_view>
 #include <cassert>
 #include <cstring>
 #include <vector>
 
+#if __has_include(<string_view>)
+#include <string_view>
 using std::string_view;
+
+#elif __has_include(<experimental/string_view>)
+#include <experimental/string_view>
+using std::experimental::string_view;
+
+#else
+#error <experimental/string_view> and <string_view> not found
+#endif
 
 const int CACHELINE_BIT = 6;
 
@@ -230,7 +239,7 @@ size_t to_address(const string_view &str);
 template<typename T>
 class AllEqual {
 public:
-    AllEqual() : is_first(true), is_unequal(false) {}
+    AllEqual() : prev(), is_first(true), is_unequal(false) {}
 
     void next(const T &t) {
         if (is_unequal)
