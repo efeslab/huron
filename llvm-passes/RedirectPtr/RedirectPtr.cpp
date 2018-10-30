@@ -101,7 +101,8 @@ void RedirectPtr::loadDepFile() {
         if (profile.find(std::make_pair(f2, i2)) != profile.end())
             continue;
         auto it = mallocIDs.find(std::make_pair(f1, i1));
-        assert(it != mallocIDs.end());
+        if (it == mallocIDs.end())
+            continue;
         PCInfo value(it->second);
         profile.emplace(std::make_pair(f2, i2), std::move(value));
     }
