@@ -97,6 +97,9 @@ void RedirectPtr::loadDepFile() {
     }
     size_t f1, i1, f2, i2;
     while (fin >> f1 >> i1 >> f2 >> i2) {
+        // Prefer our postprocess output over andersen analysis
+        if (profile.find(std::make_pair(f2, i2)) != profile.end())
+            continue;
         auto it = mallocIDs.find(std::make_pair(f1, i1));
         assert(it != mallocIDs.end());
         PCInfo value(it->second);
