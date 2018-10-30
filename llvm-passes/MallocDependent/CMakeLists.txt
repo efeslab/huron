@@ -1,4 +1,6 @@
-add_library(LLVMMallocDependent MODULE MallocDependent.cpp
+include_directories("../include")
+add_llvm_loadable_module(LLVMMallocDependent
+  MallocDependent.cpp
   Andersen.cpp
   AndersenAA.cpp
   ConstraintCollect.cpp
@@ -6,4 +8,6 @@ add_library(LLVMMallocDependent MODULE MallocDependent.cpp
   ConstraintSolving.cpp
   ExternalLibrary.cpp
   NodeFactory.cpp
+  PLUGIN_TOOL
+  opt
 )
