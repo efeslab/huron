@@ -87,6 +87,8 @@ void RedirectPtr::loadProfile() {
 }
 
 void RedirectPtr::loadDepFile() {
+    if (depfile.empty())
+        return;
     dbgs() << "Loading from optional file: " << depfile << "\n\n";
     std::ifstream fin(depfile.c_str());
     if (fin.fail()) {
@@ -275,7 +277,7 @@ void RedirectPtr::makeMallocTables(Module &M) {
     }
     Constant *init = ConstantArray::get(arrayType, subArrayInits);
     new GlobalVariable(
-            M, arrayType, /*isConstant=*/true, GlobalValue::PrivateLinkage, init, "__malloc_offset_table"
+            M, arrayType, /*isConstant=*/true, GlobalValue::ExternalLinkage, init, "__malloc_offset_table"
     );
 
     ArrayType* array2Type = ArrayType::get(sizeType, mallocN);
