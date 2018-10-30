@@ -45,11 +45,20 @@
 
 using namespace llvm;
 
+static cl::opt<std::string> inFilePath(
+    "malloc-file", cl::init("mallocRuntimeIDs.txt"),
+    cl::desc("File to read malloc info from"), cl::Optional
+);
+static cl::opt<std::string> outFilePath(
+    "output-file", cl::init("Andersen.txt"),
+    cl::desc("File to output to"), cl::Optional
+);
+
 namespace {
   struct AddFunction : public ModulePass {
     static char ID;
     std::unique_ptr<AndersenAAResult> result;
-    AddFunction() : ModulePass(ID) {}
+    AddFunction() : ModulePass(ID), fout(outFilePath) {}
     AndersenAAResult &getResult() {return *result;}
     const AndersenAAResult &getResult() const {return *result;}
     void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -91,6 +100,7 @@ namespace {
               {
                 if(v1 == pointer || result->publicAlias(v1, pointer) == MayAlias || result->publicAlias(v1, pointer) == MustAlias)
                 {
+                  fout << curr_func_id << " " << curr_inst_id << " " << functionId << " " << instructionId << "\n";
                   errs() << functionId << " " << instructionId << " " << curr_func_id << " " << curr_inst_id << "\n" << *Inst << "\n";
                 }
               }
@@ -102,8 +112,8 @@ namespace {
       }
     }
     bool runOnModule(Module &M) override {
-      errs() << "Loading malloc func insts from mallocRuntimeIDs.txt file...\n";
-      std::ifstream fp("mallocRuntimeIDs.txt");
+      errs() << "Loading malloc func insts from " << inFilePath << "...\n";
+      std::ifstream fp(inFilePath);
       std::map<std::pair<unsigned, unsigned>, bool> malloc_func_inst_id;
       unsigned tmp_f, tmp_i;
       if (fp.is_open())
@@ -162,27 +172,17 @@ namespace {
           }
         }
         functionId+=1;
-      } 
-      /*Function *alignedAlloc = cast<Function>(M.getOrInsertFunction(
-        "aligned_alloc", Type::getInt8PtrTy(M.getContext()), Type::getInt64Ty(M.getContext()), Type::getInt64Ty(M.getContext())
-        ));*/
-      /*for(unsigned i = 0; i < modifiedOnes.size(); i++)
-        {
-        Instruction *Inst = modifiedOnes[i];
-        if(malloc_func_inst_id.find(std::make_pair(functionIds[i], instructionIds[i])) != malloc_func_inst_id.end())
-        {
-        }
-        }*/
+      }
       result.reset(new AndersenAAResult(M));
       for(unsigned i = 0; i < modifiedOnes.size(); i++)
       {
         Instruction *Inst = modifiedOnes[i];
         runInternal(*Inst, M, functionIds[i], instructionIds[i]);
       }
-      //for(auto fi = M.begin(); fi != M.end(); fi++)runInternal(*fi);
       return false;
     }
     private:
+      std::ofstream fout;
   };
 }
 

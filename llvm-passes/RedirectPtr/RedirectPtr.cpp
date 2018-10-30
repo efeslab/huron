@@ -95,11 +95,8 @@ void RedirectPtr::loadDepFile() {
         errs() << "Open file failed! Skipping.\n";
         return;
     }
-    size_t n;
-    fin >> n;
-    for (size_t i = 0; i < n; i++) {
-        size_t f1, i1, f2, i2;
-        fin >> f1 >> i1 >> f2 >> i2;
+    size_t f1, i1, f2, i2;
+    while (fin >> f1 >> i1 >> f2 >> i2) {
         auto it = mallocIDs.find(std::make_pair(f1, i1));
         assert(it != mallocIDs.end());
         PCInfo value(it->second);
