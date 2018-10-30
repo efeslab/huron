@@ -2,9 +2,11 @@
 // Created by yifanz on 10/26/18.
 //
 
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/IR/Instructions.h>
+
 #include "GroupFuncLoop.h"
 #include "UnrollLoopPass.h"
-#include "llvm/IR/Instructions.h"
 
 GroupFuncLoop::GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT &insts) :
         module(M), instsPtr(&insts), func(F) {
@@ -89,37 +91,53 @@ void GroupFuncLoop::adjustMalloc(Instruction *inst, const MallocInfo &malloc) co
 
     Instruction *next = inst->getNextNode();
     GlobalVariable *mallocStartT = module->getGlobalVariable("__malloc_start_table");
+    GlobalVariable *mallocSizeT = module->getGlobalVariable("__malloc_start_table");
     SmallVector<Value *, 2> indices({
         ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, malloc.id)
     });
     IRBuilder<> irb(next);
     Value *allocAddr = irb.CreatePtrToInt(call, sizeType);
     Value *startTableEntry = irb.CreateGEP(mallocStartT, indices);
+    Value *sizeTableEntry = irb.CreateGEP(mallocSizeT, indices);
     irb.CreateStore(allocAddr, startTableEntry);
+    irb.CreateStore(newSize, sizeTableEntry);
 }
 
 void GroupFuncLoop::resolveExtDep(Instruction *inst, size_t depMallocId) const {
     unsigned idx = getPointerOperandIndex(inst);
     Value *pointerOpr = inst->getOperand(idx);
     GlobalVariable *mallocStartT = module->getGlobalVariable("__malloc_start_table");
+    GlobalVariable *mallocSizeT = module->getGlobalVariable("__malloc_size_table");
     GlobalVariable *mallocOffsetT = module->getGlobalVariable("__malloc_offset_table");
     SmallVector<Value *, 2> msIndices({
         ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId)
     });
 
-    IRBuilder<> irb(inst);
-    Value *globalArrEntry = irb.CreateGEP(mallocStartT, msIndices);
-    Value *allocStartAddr = irb.CreateLoad(globalArrEntry);
-    Value *pointerAddr = irb.CreatePtrToInt(pointerOpr, sizeType);
-    Value *offset = irb.CreateSub(pointerAddr, allocStartAddr);
+    IRBuilder<> checkInboundIRB(inst);
+    Value *allocStartPtr = checkInboundIRB.CreateGEP(mallocStartT, msIndices);
+    Value *allocStartAddr = checkInboundIRB.CreateLoad(allocStartPtr);
+    Value *pointerAddr = checkInboundIRB.CreatePtrToInt(pointerOpr, sizeType);
+    Value *offset = checkInboundIRB.CreateSub(pointerAddr, allocStartAddr);
+    Value *allocSizePtr = checkInboundIRB.CreateGEP(mallocSizeT, msIndices);
+    Value *allocSize = checkInboundIRB.CreateLoad(allocSizePtr);
+    Value *lhsInbound = checkInboundIRB.CreateICmpUGE(pointerAddr, allocStartAddr);
+    Value *rhsInbound = checkInboundIRB.CreateICmpULT(offset, allocSize);
+    Value *inbound = checkInboundIRB.CreateAnd(lhsInbound, rhsInbound);
+    TerminatorInst *thenTerm = SplitBlockAndInsertIfThen(inbound, inst, false);
+
+    IRBuilder<> redirectIRB(thenTerm);
     SmallVector<Value *, 3> moIndices({
         ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId), offset
     });
-    Value *mappedOffsetEntry = irb.CreateGEP(mallocOffsetT, moIndices);
-    Value *mappedOffset = irb.CreateLoad(mappedOffsetEntry);
-    Value *mappedPointerAddr = irb.CreateAdd(allocStartAddr, mappedOffset);
-    Value *mappedPointer = irb.CreateIntToPtr(mappedPointerAddr, pointerOpr->getType());
-    inst->setOperand(idx, mappedPointer);
+    Value *mappedOffsetEntry = redirectIRB.CreateGEP(mallocOffsetT, moIndices);
+    Value *mappedOffset = redirectIRB.CreateLoad(mappedOffsetEntry);
+    Value *mappedPointerAddr = redirectIRB.CreateAdd(allocStartAddr, mappedOffset);
+    Value *mappedPointer = redirectIRB.CreateIntToPtr(mappedPointerAddr, pointerOpr->getType());
+
+    PHINode *pn = PHINode::Create(pointerOpr->getType(), 2, "", inst);
+    pn->addIncoming(pointerOpr, cast<Instruction>(pointerOpr)->getParent());
+    pn->addIncoming(mappedPointer, thenTerm->getParent());
+    inst->setOperand(idx, pn);
 }
 
 void GroupFuncLoop::getAllLoops() {

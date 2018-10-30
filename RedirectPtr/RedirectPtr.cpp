@@ -285,6 +285,9 @@ void RedirectPtr::makeMallocTables(Module &M) {
     new GlobalVariable(
             M, array2Type, /*isConstant=*/false, GlobalValue::CommonLinkage, zeroInit, "__malloc_start_table"
     );
+    new GlobalVariable(
+            M, array2Type, /*isConstant=*/false, GlobalValue::CommonLinkage, zeroInit, "__malloc_size_table"
+    );
 }
 
 void RedirectPtr::locateInstructions(Module &M, CallGraphT *cg) {
