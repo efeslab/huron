@@ -19,9 +19,11 @@ AliasResult AndersenAAResult::andersenAlias(const Value *v1, const Value *v2) {
     return MustAlias;
 
   auto itr1 = (anders.ptsGraph).find(n1), itr2 = (anders.ptsGraph).find(n2);
+  /*
   if (itr1 == (anders.ptsGraph).end() && itr2 == (anders.ptsGraph).end())
     // We know nothing about both (v1, v2)
     return NoAlias;//Trying to see which case is the performance worsening MayAlias
+  */
   if (itr1 == (anders.ptsGraph).end() || itr2 == (anders.ptsGraph).end())
     // We knows nothing about at least one of (v1, v2)
     return MayAlias;

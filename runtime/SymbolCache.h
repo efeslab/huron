@@ -10,7 +10,7 @@
 #include <vector>
 #include <execinfo.h>
 #include <cxxabi.h>
-
+#include <memory>
 
 class SymbolCache {
     std::unordered_map<void *, std::string> addresses;
