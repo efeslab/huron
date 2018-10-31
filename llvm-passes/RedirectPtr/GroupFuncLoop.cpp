@@ -53,7 +53,7 @@ void GroupFuncLoop::runOnFunction() {
 }
 
 void GroupFuncLoop::replaceCallFunc(Instruction *inst, Function *newFunc) const {
-    inst->dump();
+    //inst->dump();
     // pthread_create cannot be invoked.
     auto *call = cast<CallInst>(inst);
     call->setArgOperand(2, newFunc);

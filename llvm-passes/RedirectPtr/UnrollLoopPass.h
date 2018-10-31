@@ -20,7 +20,7 @@ public:
         Loop *loop = inferLoop(insts);
         size_t count = getLoopUnrollCount(insts);
         dbgs() << "  Unrolling the following loop for " << count << " times: \n    ";
-        loop->dump();
+        //loop->dump();
         for (const auto &p: insts)
             hook.emplace(p.first, std::vector<Instruction *>());
         unrollLoop(insts, loop, count);
