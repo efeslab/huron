@@ -123,7 +123,12 @@ void GroupFuncLoop::resolveExtDep(Instruction *inst, size_t depMallocId) const {
     Value *lhsInbound = checkInboundIRB.CreateICmpUGE(pointerAddr, allocStartAddr);
     Value *rhsInbound = checkInboundIRB.CreateICmpULT(offset, allocSize);
     Value *inbound = checkInboundIRB.CreateAnd(lhsInbound, rhsInbound);
-    TerminatorInst *thenTerm = SplitBlockAndInsertIfThen(inbound, inst, false);
+    SmallVector<Value *, 2> builtinExpectArgs({
+        inbound, ConstantInt::get(inbound->getType(), 0)
+    });
+    Value *expect = checkInboundIRB.CreateIntrinsic(Intrinsic::expect, builtinExpectArgs);
+    assert(expect);
+    TerminatorInst *thenTerm = SplitBlockAndInsertIfThen(expect, inst, false);
 
     IRBuilder<> redirectIRB(thenTerm);
     SmallVector<Value *, 3> moIndices({
