@@ -32,10 +32,10 @@ struct LocRecord {
 
     void dump(FILE *fd, int thread_fd, unsigned int r, unsigned int w, uint64_t time) const {
         if (is_heap)
-            fprintf(fd, "%d,%p,%u,%u,%u,%u,%u,%u,%u%" PRIu64 "\n",
+            fprintf(fd, "%d,%p,%u,%u,%u,%u,%u,%u,%u,%" PRIu64 "\n",
                 thread_fd, (void *) addr, m_id, m_offset, func_id, inst_id, size, r, w, time);
         else
-            fprintf(fd, "%d,%p,-1,-1,%u,%u,%u,%u,%u%" PRIu64 "\n",
+            fprintf(fd, "%d,%p,-1,-1,%u,%u,%u,%u,%u,%" PRIu64 "\n",
                     thread_fd, (void *) addr, func_id, inst_id, size, r, w, time);
     }
 
