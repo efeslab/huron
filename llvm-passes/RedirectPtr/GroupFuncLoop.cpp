@@ -3,13 +3,12 @@
 //
 
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
-#include <llvm/IR/Instructions.h>
 
 #include "GroupFuncLoop.h"
 #include "UnrollLoopPass.h"
 
 GroupFuncLoop::GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT &insts) :
-        module(M), instsPtr(&insts), func(F) {
+        module(M), func(F), instsPtr(&insts) {
     context = &M->getContext();
     layout = new DataLayout(M);
     unsigned int ptrSize = layout->getPointerSizeInBits();
@@ -17,7 +16,7 @@ GroupFuncLoop::GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT 
     loopInfo = &(MP->getAnalysis<LoopInfoWrapperPass>(*F).getLoopInfo());
 }
 
-void GroupFuncLoop::runOnFunction() {
+std::unordered_set<DebugLoc *> GroupFuncLoop::runOnFunction() {
     dbgs() << "Working on function " << func->getName() << '\n';
     dbgs() << "  Gathering the loops.\n";
     getAllLoops();
@@ -29,10 +28,12 @@ void GroupFuncLoop::runOnFunction() {
     dbgs() << "  Processing instructions.\n";
     size_t c = 0, m = 0, d = 0, o = 0;
 
+    std::unordered_set<DebugLoc *> offsetLocs;
     for (const auto &p2: finalTable) {
-        auto changeOffset = [this, p2, &o](std::pair<size_t, size_t> fromTo) {
-            long offset = (long)fromTo.second - (long)fromTo.first;
+        auto changeOffset = [this, p2, &o, &offsetLocs](std::pair<size_t, size_t> fromTo) {
+            long offset = (long) fromTo.second - (long) fromTo.first;
             offsetSimplInst(p2.first, offset);
+            offsetLocs.insert(const_cast<DebugLoc *>(&p2.first->getDebugLoc()));
             o++;
         };
         auto changeMalloc = [this, p2, &m](const MallocInfo &malloc) {
@@ -50,6 +51,7 @@ void GroupFuncLoop::runOnFunction() {
         p2.second.actOn(changeOffset, changeMalloc, externalDep, changeCallee);
     }
     dbgs() << "  (c, m, o, d) = (" << c << ", " << m << ", " << o << ", " << d << ")\n";
+    return offsetLocs;
 }
 
 void GroupFuncLoop::replaceCallFunc(Instruction *inst, Function *newFunc) const {
@@ -93,8 +95,8 @@ void GroupFuncLoop::adjustMalloc(Instruction *inst, const MallocInfo &malloc) co
     GlobalVariable *mallocStartT = module->getGlobalVariable("__malloc_start_table");
     GlobalVariable *mallocSizeT = module->getGlobalVariable("__malloc_start_table");
     SmallVector<Value *, 2> indices({
-        ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, malloc.id)
-    });
+                                            ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, malloc.id)
+                                    });
     IRBuilder<> irb(next);
     Value *allocAddr = irb.CreatePtrToInt(call, sizeType);
     Value *startTableEntry = irb.CreateGEP(mallocStartT, indices);
@@ -110,8 +112,8 @@ void GroupFuncLoop::resolveExtDep(Instruction *inst, size_t depMallocId) const {
     GlobalVariable *mallocSizeT = module->getGlobalVariable("__malloc_size_table");
     GlobalVariable *mallocOffsetT = module->getGlobalVariable("__malloc_offset_table");
     SmallVector<Value *, 2> msIndices({
-        ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId)
-    });
+                                              ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId)
+                                      });
 
     IRBuilder<> checkInboundIRB(inst);
     Value *allocStartPtr = checkInboundIRB.CreateGEP(mallocStartT, msIndices);
@@ -124,16 +126,17 @@ void GroupFuncLoop::resolveExtDep(Instruction *inst, size_t depMallocId) const {
     Value *rhsInbound = checkInboundIRB.CreateICmpULT(offset, allocSize);
     Value *inbound = checkInboundIRB.CreateAnd(lhsInbound, rhsInbound);
     SmallVector<Value *, 2> builtinExpectArgs({
-        inbound, ConstantInt::get(inbound->getType(), 0)
-    });
+                                                      inbound, ConstantInt::get(inbound->getType(), 0)
+                                              });
     Value *expect = checkInboundIRB.CreateIntrinsic(Intrinsic::expect, builtinExpectArgs);
     assert(expect);
     TerminatorInst *thenTerm = SplitBlockAndInsertIfThen(expect, inst, false);
 
     IRBuilder<> redirectIRB(thenTerm);
     SmallVector<Value *, 3> moIndices({
-        ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId), offset
-    });
+                                              ConstantInt::get(sizeType, 0), ConstantInt::get(sizeType, depMallocId),
+                                              offset
+                                      });
     Value *mappedOffsetEntry = redirectIRB.CreateGEP(mallocOffsetT, moIndices);
     Value *mappedOffset = redirectIRB.CreateLoad(mappedOffsetEntry);
     Value *mappedPointerAddr = redirectIRB.CreateAdd(allocStartAddr, mappedOffset);

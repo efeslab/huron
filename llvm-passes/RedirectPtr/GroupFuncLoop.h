@@ -6,6 +6,9 @@
 #define HURON_GROUPFUNCLOOP_H
 
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/ADT/SetVector.h>
+#include <llvm/IR/DebugInfoMetadata.h>
+#include <unordered_set>
 
 #include "Utils.h"
 
@@ -13,7 +16,7 @@ class GroupFuncLoop {
 public:
     explicit GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT &insts);
 
-    void runOnFunction();
+    std::unordered_set<DebugLoc *> runOnFunction();
 
 private:
     void getAllLoops();

@@ -3,6 +3,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 
 #include <fstream>
 #include <set>
@@ -48,6 +49,8 @@ namespace {
 
         void buildAbsPosProfile(Module &M);
 
+        void writeSourceLocsFile(const std::vector<DebugLoc *> &locations);
+
         size_t mallocN{};
         std::vector<std::vector<size_t>> mallocOffsets{};
         std::unordered_map<std::pair<size_t, size_t>, size_t> mallocIDs{};
@@ -72,6 +75,10 @@ static cl::opt<std::string> locfile("locfile", cl::desc("Specify profile path"),
                                     cl::value_desc("filename"), cl::Required);
 static cl::opt<std::string> depfile(
         "depfile", cl::desc("Specify an optional file signifying ptr->alloc dependency"),
+        cl::value_desc("filename"), cl::Optional
+);
+static cl::opt<std::string> srclocfile(
+        "loc-output", cl::desc("Specify an optional file to write source code location info to"),
         cl::value_desc("filename"), cl::Optional
 );
 
@@ -249,11 +256,14 @@ bool RedirectPtr::runOnModule(Module &M) {
 
     buildAbsPosProfile(M);
 
+    std::unordered_set<DebugLoc *> offsetLocs;
     for (auto &p: absPosProfile) {
         GroupFuncLoop funcPass(this, &M, p.first, p.second);
-        funcPass.runOnFunction();
+        auto next = funcPass.runOnFunction();
+        offsetLocs.insert(next.begin(), next.end());
     }
-
+    std::vector<DebugLoc *> offsetLocsVec(offsetLocs.begin(), offsetLocs.end());
+    writeSourceLocsFile(offsetLocsVec);
     return true;
 }
 
@@ -382,4 +392,23 @@ void RedirectPtr::buildAbsPosProfile(Module &M) {
             this->absPosProfile[&fb].emplace(p.first, p.second[0]);
     }
     dbgs() << "\n";
+}
+
+void RedirectPtr::writeSourceLocsFile(const std::vector<DebugLoc *> &locations) {
+    if (srclocfile.empty())
+        return;
+    std::error_code error;
+    raw_fd_ostream fout(srclocfile, error, sys::fs::F_Text);
+    if (error) {
+        errs() << "Open output file failed! Skipping output.\n";
+        return;
+    }
+    std::set<std::tuple<std::string, unsigned, unsigned>> outputInfo;
+    for (const DebugLoc *loc: locations) {
+        auto *Scope = cast<DIScope>(loc->getScope());
+        outputInfo.emplace(Scope->getFilename(), loc->getLine(), loc->getCol());
+    }
+    for (const auto &t: outputInfo) {
+        fout << std::get<0>(t) << ' ' << std::get<1>(t) << ' ' << std::get<2>(t) << '\n';
+    }
 }
