@@ -69,7 +69,8 @@ def main():
     all_lines = get_lines_of_pcs(bin_path, all_pcs, getcwd())
     src_pcs = src_list_to_pc(all_pcs, all_lines, src_list)
     pcs = [pc for _, pcs in src_pcs for pc in pcs]
-    print(pcs)
+    for pc in pcs:
+        print(pc)
 
 
 if __name__ == '__main__':
