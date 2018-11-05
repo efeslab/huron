@@ -37,7 +37,8 @@ def get_bin_all_pcs(path):
 def get_pc_to_src_line(path, pcs, fix_cwd):
     def get_src_line(path, pc):
         output = check_output(['addr2line', '-i', '-e', path, pc])
-        src_file, row_str = output.decode('utf-8').strip().split(':')
+        inline_stack = output.decode('utf-8').strip().split('\n')
+        src_file, row_str = inline_stack[0].split(':')
         if src_file == '??' or row_str == '?':
             return None
         else:
