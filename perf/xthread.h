@@ -81,11 +81,11 @@ public:
     void stopMainThread() {
         current->remove_self();
         // Ask all threads to stop writing and print.
-        // std::ofstream stream("output.txt");
+        std::ofstream stream("__perf_ips.txt");
         for (auto &th: _threads) {
-            th.put_list(std::cout);
+            th.put_list(stream);
         }
-        // stream.close();
+        stream.close();
     }
 
     /// Create the wrapper 
