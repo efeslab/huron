@@ -29,7 +29,7 @@ Perf::Perf(size_t eventId, PredT pred, ActionT action, uint64_t sample_period, u
     _attr.sample_period = sample_period;
     _attr.sample_type = PERF_SAMPLE_IP;
     _attr.exclude_kernel = 1;
-    _attr.precise_ip = 1;
+    _attr.precise_ip = 2;
     _attr.disabled = 1;
     assert(wakeup_period);
     _attr.wakeup_events = wakeup_period;
