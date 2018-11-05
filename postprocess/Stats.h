@@ -11,7 +11,7 @@
 
 class FSRankStat {
 public:
-    explicit FSRankStat(const std::string &path) : stats_stream(path) {}
+    //explicit FSRankStat(const std::string &path) : stats_stream(path) {}
 
     void emplace(size_t fs, int mloc) {
         fs_mloc_ordering.emplace(fs, mloc);

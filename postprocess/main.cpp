@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
     if (subcmd == "detect") {
         DetectPass dpass(args[2], vector<string>(args.begin() + 4, args.end()));
         dpass.compute();
-        dpass.print_result(args[3]);
+        //dpass.print_result(args[3]);
     }
     else if (subcmd == "repair") {
         RepairPass rpass(args[2], vector<string>(args.begin() + 4, args.end()));

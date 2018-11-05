@@ -9,6 +9,7 @@
 #include <set>
 #include <map>
 #include <stack>
+#include <numeric>
 #include "Detect.h"
 
 using namespace std;
@@ -241,10 +242,11 @@ public:
     }
 
     friend ostream &operator<<(ostream &os, const Graph &g) {
-        os << ">>>0x" << hex << g.clid << dec << '(' << g.estm_fs << ")<<<\n";
+        os << g.clid << "," << g.estm_fs << '\n';
+        /*os << ">>>0x" << hex << g.clid << dec << '(' << g.estm_fs << ")<<<\n";
         for (const auto &rec: g.records)
             os << rec << '\n';
-        os << '\n';
+        os << '\n';*/
         return os;
     }
 
@@ -304,7 +306,7 @@ public:
     }
 
     friend ostream &operator<<(ostream &os, const MallocStorageT &mst) {
-        os << "=================" << mst.m_id << "(" << mst.malloc_fs << ")================\n";
+        //os << "=================" << mst.m_id << "(" << mst.malloc_fs << ")================\n";
         for (const Graph &g: mst.graphs)
             os << g;
         return os;
@@ -363,8 +365,8 @@ private:
 
 DetectPass::DetectPass(const string &in, const vector<string> &rest) :
         log_file(in),
-        summary_file(insert_suffix(in, "_summary")),
-        fsrStat(insert_suffix(in, "_fs_malloc")) {
+        summary_file("summary/"+insert_suffix(in, "_summary"))/*,
+        fsrStat(insert_suffix(in, "_fs_malloc"))*/ {
     assert(rest.size() <= 2);
     threshold = (!rest.empty()) ? stoul(rest[0]) : 100;
     string malloc_path = (rest.size() == 2) ? rest[1] : "mallocRuntimeIDs.txt";
@@ -399,10 +401,10 @@ void DetectPass::compute() {
     }
     cout << "# of mallocs processed: " << bins.size() << '/' << bins.size() << endl;
     for (auto &pair: this->data) {
-        fsrStat.emplace(pair.second->get_n_false_sharing(), pair.first);
+        //fsrStat.emplace(pair.second->get_n_false_sharing(), pair.first);
         summary_file << *(pair.second);
     }
-    fsrStat.print();
+    //fsrStat.print();
 }
 
 DetectPass::ApiT DetectPass::get_api_output() const {
