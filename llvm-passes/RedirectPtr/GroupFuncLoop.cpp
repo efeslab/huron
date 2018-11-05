@@ -14,6 +14,11 @@ GroupFuncLoop::GroupFuncLoop(ModulePass *MP, Module *M, Function *F, PostCloneT 
     unsigned int ptrSize = layout->getPointerSizeInBits();
     sizeType = intPtrType = Type::getIntNTy(*context, ptrSize);
     loopInfo = &(MP->getAnalysis<LoopInfoWrapperPass>(*F).getLoopInfo());
+
+    Function *pthreadCreate = M->getFunction("pthread_create");
+    assert(pthreadCreate->arg_size() > 3);
+    Argument &thirdArg = *(pthreadCreate->arg_begin() + 2);
+    callFuncType = thirdArg.getType();
 }
 
 std::unordered_set<DebugLoc *> GroupFuncLoop::runOnFunction() {
@@ -55,10 +60,15 @@ std::unordered_set<DebugLoc *> GroupFuncLoop::runOnFunction() {
 }
 
 void GroupFuncLoop::replaceCallFunc(Instruction *inst, Function *newFunc) const {
-    //inst->dump();
     // pthread_create cannot be invoked.
     auto *call = cast<CallInst>(inst);
-    call->setArgOperand(2, newFunc);
+    if (callFuncType != newFunc->getType()) {
+        IRBuilder<> irb(inst);
+        Value *casted = irb.CreateBitCast(newFunc, callFuncType);
+        call->setArgOperand(2, casted);
+    }
+    else
+        call->setArgOperand(2, newFunc);
 }
 
 void GroupFuncLoop::offsetSimplInst(Instruction *inst, long offset) const {

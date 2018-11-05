@@ -245,8 +245,14 @@ inline Function *getThreadFuncFrom(CallInvoke *ci) {
     if (!callee)
         return nullptr;
     StringRef calledName = callee->getName();
-    if (calledName == pthread)
+    if (calledName == pthread) {
+        // Function may be type-casted before used for pthread_create
+        if (auto *bc = dyn_cast<BitCastOperator>(ci->getArgOperand(2)))
+            return cast<Function>(bc->getOperand(0));
+        if (auto *bc = dyn_cast<BitCastInst>(ci->getArgOperand(2)))
+            return cast<Function>(bc->getOperand(0));
         return cast<Function>(ci->getArgOperand(2));
+    }
     else
         return nullptr;
 }

@@ -34,7 +34,7 @@ private:
     DataLayout *layout{};
     Function *func{};
     LoopInfo *loopInfo{};
-    Type *intPtrType, *sizeType;
+    Type *intPtrType, *sizeType, *callFuncType;
     PostCloneT *instsPtr;
     std::unordered_map<Loop *, PostCloneT> unrollInsts;
     PostUnrollT finalTable;
