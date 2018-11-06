@@ -11,7 +11,7 @@ else:
 # full_file = {}
 first_cycle = 0
 
-with open('1.log', 'r') as csv_file:
+with open('record.log', 'r') as csv_file:
   #for i in range(10):
   #  line=csv_file.readline()
   for line in csv_file:
