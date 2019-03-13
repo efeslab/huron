@@ -13,7 +13,7 @@ void *run1(void *ptr)
   int start = *((int *)ptr);
   for(int i=start; i < TOTAL; i+=THREAD_COUNT)
   {
-    for(int j = 0; j < ITER; j++)
+    for(int j = 0; j < 3*ITER; j++)
     {
       int val = dynMemory[0][i];
       if(j==0)val=0;
@@ -32,7 +32,7 @@ void *run2(void *ptr)
   int start = *((int *)ptr);
   for(int i=start; i < TOTAL; i+=THREAD_COUNT)
   {
-    for(int j = 0; j < ITER; j++)
+    for(int j = 0; j < 2*ITER; j++)
     {
       int val = dynMemory[1][i];
       if(j==0)val=0;
@@ -202,7 +202,7 @@ int main(int argc, char *argv[])
 {
   if(argc > 1)ITER=atoi(argv[1]);
   dynMemory[0] = (int * )malloc(TOTAL*sizeof(int));
-  pthread_t threads[THREAD_COUNT];
+  pthread_t threads[10][THREAD_COUNT];
   int params[THREAD_COUNT];
   for(int i = 0; i < THREAD_COUNT; i++)
   {
@@ -210,101 +210,101 @@ int main(int argc, char *argv[])
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run1, ((void *)(&params[i])));
+    pthread_create(&threads[0][i], NULL, run1, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[0][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 2)return 0;
   dynMemory[1] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run2, ((void *)(&params[i])));
+    pthread_create(&threads[1][i], NULL, run2, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[1][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 3)return 0;
   dynMemory[2] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run3, ((void *)(&params[i])));
+    pthread_create(&threads[2][i], NULL, run3, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[2][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 4)return 0;
   dynMemory[3] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run4, ((void *)(&params[i])));
+    pthread_create(&threads[3][i], NULL, run4, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[3][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 5)return 0;
   dynMemory[4] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run5, ((void *)(&params[i])));
+    pthread_create(&threads[4][i], NULL, run5, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[4][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 6)return 0;
   dynMemory[5] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run6, ((void *)(&params[i])));
+    pthread_create(&threads[5][i], NULL, run6, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[5][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 7)return 0;
   dynMemory[6] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run7, ((void *)(&params[i])));
+    pthread_create(&threads[6][i], NULL, run7, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[6][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 8)return 0;
   dynMemory[7] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run8, ((void *)(&params[i])));
+    pthread_create(&threads[7][i], NULL, run8, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[7][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 9)return 0;
   dynMemory[8] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run9, ((void *)(&params[i])));
+    pthread_create(&threads[8][i], NULL, run9, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[8][i], NULL);
   }
   if(argc > 2 && atoi(argv[2]) < 10)return 0;
   dynMemory[9] = (int *)malloc(TOTAL*sizeof(int));
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_create(&threads[i], NULL, run10, ((void *)(&params[i])));
+    pthread_create(&threads[9][i], NULL, run10, ((void *)(&params[i])));
   }
   for(int i = 0; i < THREAD_COUNT; i++)
   {
-    pthread_join(threads[i], NULL);
+    pthread_join(threads[9][i], NULL);
   }
   return 0;
 }

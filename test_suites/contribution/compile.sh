@@ -5,5 +5,5 @@ echo $args
 bash clean.sh
 bash compile_profile_pass.sh
 ./instrumented.out $args
-~/Documents/huron/postprocess/postprocess all record.log address_translation_table.txt
+~/Documents/huron/postprocess/postprocess all record.log address_translation_table.txt 500
 bash compile_product_pass.sh
