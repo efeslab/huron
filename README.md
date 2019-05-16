@@ -46,3 +46,5 @@ manual, 3133
 ```
 
 Congratulations! You have successfully run your first `Huron`-ed program, `product.out`. The `run.sh` script also runs the original benchmark program histogram, `original.out` as well as the version where [Sheriff](https://github.com/plasma-umass/sheriff) repaired false sharing, `sheriff.out`, and manually repaired version, `manual.out`. All the execution times (in milliseconds) are then logged in `time.csv` file.
+
+For more details, see the [step by step wiki page](https://github.com/efeslab/huron/wiki/Step-by-Step-Instructions).
