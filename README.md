@@ -1,6 +1,6 @@
 # Huron: Hybrid False Sharing Detecetion and Repair
 
-This repository contains the source code implementation of our paper, [Huron: Hybrid False Sharing Detection adn Repair](https://web.eecs.umich.edu/~barisk/public/huron.pdf). While the implementation can be built from this repository manually, we strongly recommend the following step by step guide using a pre-installed virtual machine.
+This repository contains the source code implementation of our paper, [Huron: Hybrid False Sharing Detection and Repair](https://web.eecs.umich.edu/~barisk/public/huron.pdf). While the implementation can be built from this repository manually, we strongly recommend the following step by step guide using a pre-installed virtual machine.
 
 ## Pre-requisite
 1. The supplied virtual machine disk (VMDK) file can be run on [VirtualBox software](https://www.virtualbox.org). We have tested the VMDK file on VirtualBox 5.2.26 r128414 (Ubuntu 16.04) and VirtualBox-6.0.4-128413 (Windows 10) but hope the artifact will work on other versions of VirtualBox as well. To view VirtualBox’s version number you can go to Help -> About VirtualBox.
